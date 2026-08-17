@@ -26,7 +26,11 @@ scrcpy 1.23 用私有 API `SurfaceControl.createDisplay(String, boolean)` 建投
 
 ## 新机接入 SOP
 
-在每台新装的 agent 上，解压官方 agent 包后、启动前，跑一次本脚本即可（或把补丁 jar 直接打进你们统一发布的 agent 包）。
+- **走本仓库发布的 agent 包**：仓库 `plugins/sonic-android-scrcpy.jar` 已是补丁版，`.github/workflows/release.yml` 会把它拷进各平台 zip，所以**新 release 的 agent 包已自带补丁，新机零操作**。
+- **用官方/旧包**：解压后、启动前，对目录跑一次本脚本 `./patch-agent-scrcpy.sh <agent目录>`。
+
+> ⚠️ **维护提醒**：别把 `plugins/sonic-android-scrcpy.jar` 从上游同步回原版，否则新安卓投屏黑屏回归。
+> （本想在 release.yml 那步加防回退注释，但改 `.github/workflows/*` 需要 gh token 的 `workflow` 权限，当前 token 没有，故说明放这里。）
 
 ## 回退
 
