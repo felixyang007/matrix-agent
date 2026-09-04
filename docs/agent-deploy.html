@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Matrix Agent 部署指南（小白版）</title>
+<style>
+:root{
+  --blue:#2563eb; --blue-d:#1e40af; --blue-bg:#eff6ff;
+  --green:#16a34a; --green-bg:#f0fdf4;
+  --amber:#d97706; --amber-bg:#fffbeb;
+  --red:#dc2626; --red-bg:#fef2f2;
+  --ink:#1e293b; --ink-2:#475569; --ink-3:#94a3b8;
+  --line:#e2e8f0; --bg:#f8fafc; --card:#ffffff;
+  --code-bg:#0f172a; --code-ink:#e2e8f0;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;color:var(--ink);background:var(--bg);line-height:1.75}
+.wrap{max-width:860px;margin:0 auto;padding:0 20px 80px}
+
+/* 顶部 */
+header{background:linear-gradient(135deg,#1e3a8a,#2563eb);color:#fff;padding:44px 20px 38px;margin-bottom:32px}
+header .wrap{padding-bottom:0}
+header h1{font-size:28px;font-weight:700;letter-spacing:.5px}
+header p{margin-top:10px;opacity:.92;font-size:15px}
+.badge{display:inline-block;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.35);border-radius:999px;padding:2px 12px;font-size:12.5px;margin-right:8px;margin-top:14px}
+
+/* 顶部导航 */
+nav{position:sticky;top:0;z-index:50;background:#ffffffee;backdrop-filter:blur(8px);border-bottom:1px solid var(--line);margin:0 -20px 32px;padding:0 20px}
+nav .wrap{display:flex;gap:4px;overflow-x:auto;padding-bottom:0;max-width:860px}
+nav a{white-space:nowrap;padding:12px 13px;font-size:14px;color:var(--ink-2);text-decoration:none;border-bottom:2.5px solid transparent}
+nav a:hover{color:var(--blue)}
+nav a.cur{color:var(--blue);border-bottom-color:var(--blue)}
+
+/* 步骤卡片 */
+section.step{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:26px 26px 22px;margin-bottom:26px;box-shadow:0 1px 3px rgba(15,23,42,.05)}
+.step-head{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.step-num{flex:none;width:38px;height:38px;border-radius:10px;background:var(--blue);color:#fff;font-weight:800;font-size:18px;display:flex;align-items:center;justify-content:center}
+.step.done .step-num{background:var(--green)}
+.step-head h2{font-size:19px}
+.step-head .chk{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-3);cursor:pointer;user-select:none}
+.step-head .chk input{width:17px;height:17px;accent-color:var(--green);cursor:pointer}
+.step.done{border-color:#bbf7d0}
+.step p{color:var(--ink-2);font-size:15px;margin:10px 0}
+.step p b,.step li b{color:var(--ink)}
+.step ol,.step ul{margin:10px 0 6px 22px;color:var(--ink-2);font-size:15px}
+.step li{margin:5px 0}
+h3.sub{font-size:15.5px;margin:18px 0 6px;color:var(--ink)}
+
+/* 提示框 */
+.tip,.ok-box,.warn-box{border-radius:10px;padding:12px 16px;font-size:14px;margin:12px 0}
+.tip{background:var(--blue-bg);border:1px solid #bfdbfe;color:var(--blue-d)}
+.ok-box{background:var(--green-bg);border:1px solid #bbf7d0;color:#166534}
+.warn-box{background:var(--amber-bg);border:1px solid #fde68a;color:#92400e}
+.tip b,.ok-box b,.warn-box b{font-weight:700}
+
+/* 代码块 */
+.code{position:relative;background:var(--code-bg);border-radius:10px;margin:12px 0;overflow:hidden}
+.code pre{padding:14px 16px;overflow-x:auto;color:var(--code-ink);font-family:"SF Mono",Menlo,Consolas,"Courier New",monospace;font-size:13.5px;line-height:1.65}
+.code .cmt{color:#64748b}
+.code .copy{position:absolute;top:8px;right:8px;background:#1e293b;color:#cbd5e1;border:1px solid #334155;border-radius:7px;padding:4px 12px;font-size:12.5px;cursor:pointer;font-family:inherit}
+.code .copy:hover{background:#334155;color:#fff}
+.code .copy.ok{background:var(--green);border-color:var(--green);color:#fff}
+
+/* 输出样例 */
+.out{background:#f1f5f9;border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:10px 0;font-family:"SF Mono",Menlo,monospace;font-size:13px;color:var(--ink-2);white-space:pre-wrap}
+.out .good{color:var(--green);font-weight:700}
+.out .bad{color:var(--red);font-weight:700}
+
+/* 芯片切换 tabs */
+.tabs{display:flex;gap:8px;margin:12px 0 4px}
+.tabs button{flex:1;padding:10px;border-radius:9px;border:1.5px solid var(--line);background:#fff;font-size:14.5px;cursor:pointer;font-family:inherit;color:var(--ink-2)}
+.tabs button.on{border-color:var(--blue);background:var(--blue-bg);color:var(--blue);font-weight:700}
+.tab-pane{display:none}
+.tab-pane.on{display:block}
+
+/* 配置生成器 */
+.gen{background:var(--blue-bg);border:1px solid #bfdbfe;border-radius:12px;padding:18px;margin:14px 0}
+.gen label{display:block;font-size:14px;font-weight:600;margin:10px 0 4px}
+.gen .desc{font-size:12.5px;color:var(--ink-2);font-weight:400;margin-top:2px}
+.gen input[type=text]{width:100%;padding:9px 12px;border:1.5px solid #bfdbfe;border-radius:8px;font-size:14.5px;font-family:"SF Mono",Menlo,monospace;background:#fff}
+.gen input[type=text]:focus{outline:none;border-color:var(--blue)}
+.radio-row{display:flex;gap:14px;flex-wrap:wrap;margin-top:6px}
+.radio-row label{display:flex;align-items:center;gap:6px;font-weight:400;font-size:14.5px;cursor:pointer;margin:0}
+.radio-row input{accent-color:var(--blue);width:16px;height:16px}
+#ymlOut{margin-top:14px}
+
+/* FAQ */
+details{border:1px solid var(--line);border-radius:11px;margin:10px 0;background:#fff;overflow:hidden}
+details summary{padding:13px 16px;font-size:15px;font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px}
+details summary::before{content:"›";color:var(--blue);font-size:18px;transition:.15s;font-weight:800}
+details[open] summary::before{transform:rotate(90deg)}
+details summary:hover{background:var(--blue-bg)}
+details .body{padding:0 16px 14px;font-size:14.5px;color:var(--ink-2)}
+details .body p{margin:8px 0}
+details .body b{color:var(--ink)}
+
+/* 进度条 */
+#progress{position:fixed;bottom:0;left:0;height:4px;background:var(--green);width:0;transition:width .3s;z-index:99}
+
+footer{color:var(--ink-3);font-size:13px;text-align:center;margin-top:36px}
+.kbd{background:#eef2ff;border:1px solid #c7d2fe;border-bottom-width:2px;border-radius:5px;padding:1px 7px;font-family:"SF Mono",Menlo,monospace;font-size:13px;color:#3730a3}
+a{color:var(--blue)}
+@media (max-width:600px){
+  section.step{padding:18px 16px}
+  header h1{font-size:22px}
+}
+@media print{
+  nav,#progress,.copy,.tabs,.gen{display:none!important}
+  .tab-pane{display:block!important}
+  body{background:#fff}
+}
+</style>
+</head>
+<body>
+<div id="progress"></div>
+
+<header>
+  <div class="wrap">
+    <h1>🤖 Matrix Agent 部署指南</h1>
+    <p>把你的 Mac 变成一台「远程设备机」——插上手机，团队就能在网页上远程控制真机、跑自动化测试。</p>
+    <span class="badge">⏱ 约 15 分钟</span><span class="badge">💻 Mac / Linux 通用</span><span class="badge">🧑‍💻 无需编程基础</span>
+    <p style="margin-top:16px;font-size:13.5px;opacity:.85">所有命令都可以直接复制，粘贴到「终端」App 里按回车。右上角的「☑ 完成」可以打勾记录进度（自动保存）。</p>
+  </div>
+</header>
+
+<nav><div class="wrap">
+  <a href="#prep">准备</a><a href="#s1">① Java</a><a href="#s2">② 下载</a><a href="#s3">③ 配置</a><a href="#s4">④ 启动</a><a href="#s5">⑤ 接设备</a><a href="#faq">出问题了？</a><a href="#daily">日常维护</a>
+</div></nav>
+
+<div class="wrap">
+
+<!-- 准备 -->
+<section class="step" id="prep">
+  <div class="step-head"><div class="step-num">🧰</div><h2>开始前：准备好这 4 样东西</h2></div>
+  <ol>
+    <li><b>一台 Mac 或 Linux 电脑</b>（会一直开着、插着测试手机的那台）</li>
+    <li><b>测试手机 + 数据线</b>（Android 真机；质量好的线，别用扩展坞）</li>
+    <li><b>服务器地址</b>（形如 <span class="kbd">10.2.3.9:3000</span>，找管理员要，就是你们平时打开测试平台的网址）</li>
+    <li><b>Agent Key</b>（管理员在平台「设备中心 → Agent 中心 → 新增」里生成的钥匙，一串字母数字）</li>
+  </ol>
+  <div class="tip">💡 <b>不用准备：</b>不需要管理员密码、不需要装数据库——Agent 是个绿色软件，解压即用。</div>
+</section>
+
+<!-- 步骤1 Java -->
+<section class="step" id="s1">
+  <div class="step-head"><div class="step-num">1</div><h2>装 Java 17（Agent 的运行环境）</h2>
+    <label class="chk"><input type="checkbox" data-chk>完成</label></div>
+  <p>打开「终端」App（<span class="kbd">Command</span>+<span class="kbd">空格</span> 搜 <b>终端</b> 或 <b>Terminal</b>），粘贴下面命令回车：</p>
+  <div class="code"><button class="copy">复制</button><pre>java -version</pre></div>
+  <p>看第一行输出：</p>
+  <div class="out">openjdk version <span class="good">"17.x.x"</span> …   <span class="good">✅ 显示 17 或更高 → 跳到第 2 步</span>
+command not found: java        <span class="bad">→ 继续往下装</span></div>
+  <p>没装的话，用 Homebrew 安装（两段分别复制执行；若提示没有 brew，先到 <a href="https://brew.sh" target="_blank">brew.sh</a> 照首页一句命令装好再回来）：</p>
+  <div class="code"><button class="copy">复制</button><pre>brew install openjdk@17</pre></div>
+  <div class="code"><button class="copy">复制</button><pre>sudo ln -sfn /opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk /Library/Java/JavaVirtualMachines/openjdk-17.jdk</pre></div>
+  <div class="warn-box">⚠️ 第二条命令会要你的<b>开机密码</b>（输入时屏幕不显示，正常），回车即可。</div>
+  <p>装完再跑一次 <span class="kbd">java -version</span>，看到 17 就 OK。</p>
+</section>
+
+<!-- 步骤2 下载 -->
+<section class="step" id="s2">
+  <div class="step-head"><div class="step-num">2</div><h2>下载 Agent 包并解压</h2>
+    <label class="chk"><input type="checkbox" data-chk>完成</label></div>
+  <p>先确认你的 Mac 芯片类型（决定下载哪个包）：</p>
+  <div class="code"><button class="copy">复制</button><pre>uname -m</pre></div>
+  <div class="out">arm64    <span class="good">→ Apple 芯片（M1/M2/M3/M4）</span>
+x86_64   <span class="good">→ Intel 芯片</span></div>
+
+  <div class="tabs">
+    <button class="on" data-tab="arm">🍎 Apple 芯片（arm64）</button>
+    <button data-tab="x86">🖥 Intel 芯片（x86_64）</button>
+  </div>
+  <div class="tab-pane on" id="tab-arm">
+    <p>到团队发布页下载 <b>macosx_arm64</b> 结尾的 zip：<br>
+    👉 <a href="https://github.com/felixyang007/matrix-agent/releases" target="_blank">github.com/felixyang007/matrix-agent/releases</a>（需要团队 GitHub 权限；也可以直接用管理员发你的 zip，都一样）</p>
+    <p>假设下载到了「下载」文件夹，解压到家目录并改个好记的名字：</p>
+    <div class="code"><button class="copy">复制</button><pre>unzip -q ~/Downloads/*macosx_arm64.zip -d ~ && mv ~/sonic-agent-* ~/matrix-agent 2>/dev/null || mv ~/*macosx_arm64 ~/matrix-agent
+ls ~/matrix-agent</pre></div>
+  </div>
+  <div class="tab-pane" id="tab-x86">
+    <p>到团队发布页下载 <b>macosx_x86_64</b> 结尾的 zip：<br>
+    👉 <a href="https://github.com/felixyang007/matrix-agent/releases" target="_blank">github.com/felixyang007/matrix-agent/releases</a>（需要团队 GitHub 权限；也可以直接用管理员发你的 zip，都一样）</p>
+    <p>假设下载到了「下载」文件夹，解压到家目录并改个好记的名字：</p>
+    <div class="code"><button class="copy">复制</button><pre>unzip -q ~/Downloads/*macosx_x86_64.zip -d ~ && mv ~/sonic-agent-* ~/matrix-agent 2>/dev/null || mv ~/*macosx_x86_64 ~/matrix-agent
+ls ~/matrix-agent</pre></div>
+  </div>
+  <p>解压后目录里应该有这几样（最后一条命令的输出）：</p>
+  <div class="out">sonic-agent-macosx-arm64.jar   config/   plugins/   mini/   <span class="good">✅ 齐了</span></div>
+  <div class="tip">💡 这个目录后面统称 <span class="kbd">~/matrix-agent</span>。想放别处也行，后面命令里的路径跟着改就好。</div>
+</section>
+
+<!-- 步骤3 配置 -->
+<section class="step" id="s3">
+  <div class="step-head"><div class="step-num">3</div><h2>填配置（唯一要动脑的一步）</h2>
+    <label class="chk"><input type="checkbox" data-chk>完成</label></div>
+  <p>下面生成器里填 3 个值，右侧配置会<b>实时生成</b>，点复制按钮，然后整段粘贴进配置文件。</p>
+
+  <div class="gen">
+    <label>服务器地址 <span class="desc">（管理员给的，例如 10.2.3.9）</span>
+      <input type="text" id="srvHost" placeholder="10.2.3.9" value=""></label>
+    <label>Agent Key <span class="desc">（管理员在网页「Agent 中心」生成的钥匙）</span>
+      <input type="text" id="agentKey" placeholder="5aa13292-b9a8-408c-a091-d784d1f37472" value=""></label>
+    <label>谁会看你这台的设备画面？
+      <div class="radio-row">
+        <label><input type="radio" name="hostMode" value="127" checked>只有我自己（推荐）</label>
+        <label><input type="radio" name="hostMode" value="lan">团队任何人都能看</label>
+      </div>
+    </label>
+    <p class="desc" style="margin-top:8px" id="hostHint">✅ 推荐：只有你自己在这台 Mac 的浏览器里看设备。永远不受换 Wi-Fi 换 IP 影响，零维护。</p>
+    <div class="code" id="ymlOut"><button class="copy">复制配置</button><pre id="ymlText"></pre></div>
+  </div>
+
+  <p>把配置写进文件（一条命令搞定，不用学编辑器）：</p>
+  <div class="code"><button class="copy">复制</button><pre>cat > ~/matrix-agent/config/application-sonic-agent.yml &lt;&lt;'EOF'
+<span id="ymlInline"></span>EOF</pre></div>
+  <div class="warn-box">⚠️ 上面命令里已自动带入你填的值。<b>先在生成器里把 3 项填完</b>，再复制这条命令执行。</div>
+  <div class="tip">💡 选了「团队任何人都能看」？还需要在路由器后台把你 Mac 的 IP 做 <b>DHCP 保留（钉死 IP）</b>，否则 Mac 换网络后别人会连不上画面。不会弄就先选「只有我自己」。</div>
+</section>
+
+<!-- 步骤4 启动 -->
+<section class="step" id="s4">
+  <div class="step-head"><div class="step-num">4</div><h2>启动 Agent</h2>
+    <label class="chk"><input type="checkbox" data-chk>完成</label></div>
+  <p>复制执行（Apple 芯片版；Intel 机器把 jar 名换成 <span class="kbd">sonic-agent-macosx-x86_64.jar</span>，或直接输入 <span class="kbd">sonic-agent-</span> 后按 <span class="kbd">Tab</span> 键自动补全）：</p>
+  <div class="code"><button class="copy">复制</button><pre>cd ~/matrix-agent
+nohup java -Dfile.encoding=utf-8 -Dspring.profiles.active=sonic-agent \
+  -jar sonic-agent-macosx-arm64.jar > agent.log 2>&1 &
+disown</pre></div>
+  <p>等 10 秒左右，然后验证（关键！）：</p>
+  <div class="code"><button class="copy">复制</button><pre>grep -E "server auth successful|Enable Android Module" agent.log</pre></div>
+  <div class="out">… INFO … server auth successful!   <span class="good">✅ 连上服务器了！</span>
+… INFO … Enable Android Module      <span class="good">✅ 安卓模块已加载！</span></div>
+  <p>两条都出现 = 成功。打开测试平台网页 →「设备中心 → Agent 中心」，你那台 agent 应该是<b>在线</b>状态。</p>
+  <div class="warn-box">⚠️ 没出现？→ 页面底部「<a href="#faq">出问题了？</a>」第 1 条。</div>
+</section>
+
+<!-- 步骤5 接设备 -->
+<section class="step" id="s5">
+  <div class="step-head"><div class="step-num">5</div><h2>插上手机，完成！</h2>
+    <label class="chk"><input type="checkbox" data-chk>完成</label></div>
+  <ol>
+    <li>手机：<b>设置 → 关于手机 → 连点「版本号」7 次</b>打开开发者模式 → <b>设置 → 系统 → 开发者选项 → 打开「USB 调试」</b></li>
+    <li>数据线插手机 ↔ Mac，手机上弹出「允许 USB 调试吗？」→ 勾选 <b>一律允许</b> → 允许</li>
+    <li>验证（在终端跑）：</li>
+  </ol>
+  <div class="code"><button class="copy">复制</button><pre>~/matrix-agent/plugins/adb devices -l</pre></div>
+  <div class="out">List of devices attached
+ABC123XYZ      device product:… model:…    <span class="good">✅ 认到了（状态必须是 device）</span>
+ABC123XYZ      unauthorized               <span class="bad">→ 看手机屏幕，点掉授权弹窗</span></div>
+  <p>等十几秒，平台网页「设备中心」里你的手机就会变<b>在线</b> 🎉 点「远程控制」试试——能看到画面、能用鼠标操控，就全部完成了。</p>
+  <div class="tip">💡 <b>模拟器也行</b>：在这台 Mac 上开 Android Studio 模拟器，等同于一台插着的设备，自动被识别。</div>
+  <div class="ok-box">🎉 <b>部署完成！</b>现在你可以：网页远程控制真机 / 跑自动化用例 / 给团队成员分配这台设备。往下翻有「日常维护」和「出问题了？」两节，建议收藏本页。</div>
+</section>
+
+<!-- FAQ -->
+<section class="step" id="faq">
+  <div class="step-head"><div class="step-num">🚑</div><h2>出问题了？按症状对号入座</h2></div>
+
+  <details open><summary>Agent 连不上服务器（grep 没有 server auth successful）</summary><div class="body">
+    <p><b>最常见：Agent Key 填错</b>。核对 ~/matrix-agent/config/application-sonic-agent.yml 里的 key 和网页 Agent 中心显示的完全一致（复制粘贴，别手敲）。</p>
+    <p><b>其次：服务器地址不通</b>。验证：把浏览器打开 <span class="kbd">http://服务器地址</span> 能进平台网页吗？能 → 是地址填错了；不能 → 找管理员（服务器或网络问题）。</p>
+    <p><b>重复启动</b>：一台 Mac 只能跑一个 agent。检查：<span class="kbd">pgrep -fl sonic-agent</span> 应该只有一个 java 进程。</p>
+  </div></details>
+
+  <details><summary>设备详情一直转圈 / 远程控制连不上画面</summary><div class="body">
+    <p><b>最常见：Mac 换过 Wi-Fi、IP 变了</b>（agent 显示在线但画面点不开）。两个命令对照：</p>
+    <div class="code"><button class="copy">复制</button><pre>ipconfig getifaddr en0          <span class="cmt"># Mac 现在的 IP</span>
+grep host ~/matrix-agent/config/application-sonic-agent.yml</pre></div>
+    <p>两者不一致 → 重新生成配置（回第 3 步）改成当前 IP，或干脆改成 <span class="kbd">127.0.0.1</span>（只自己看，一劳永逸），然后按「日常维护」重启 agent。</p>
+  </div></details>
+
+  <details><summary>投屏是黑屏（页面能打开，画面全黑）</summary><div class="body">
+    <p>手机是 <b>Android 14 及以上</b>，而这台 agent 的投屏组件是老版本。让管理员给最新的 agent 包（已内置修复），或跑团队的补丁脚本：</p>
+    <div class="code"><button class="copy">复制</button><pre>tools/android14-scrcpy-fix/patch-agent-scrcpy.sh ~/matrix-agent --restart</pre></div>
+    <p>（脚本在 matrix-agent 仓库里，找管理员拿一份放到你机器上再跑）</p>
+  </div></details>
+
+  <details><summary>手机反复上线/掉线，画面时好时坏</summary><div class="body">
+    <p><b>① 先查数据线</b>（最高频）：换一根好线、直插 Mac 机身、不要经过扩展坞/hub。</p>
+    <p><b>② 再查 adb 打架</b>：如果你还装了 Homebrew 的 adb 且版本和 agent 自带的不同，两者会互相把对方踢下线。统一版本：</p>
+    <div class="code"><button class="copy">复制</button><pre>cd ~/matrix-agent/plugins && mv adb adb.orig && ln -s "$(command -v adb)" adb</pre></div>
+    <p>然后按「日常维护」重启 agent。彻底方案：跑团队的 adb 升级脚本把两边都统一到 37.0.1。</p>
+  </div></details>
+
+  <details><summary>手机上明明点了允许，设备列表还是没有</summary><div class="body">
+    <p>① <span class="kbd">~/matrix-agent/plugins/adb devices</span> 看状态：没有手机 = 线/口问题；<span class="kbd">unauthorized</span> = 再看手机屏幕点授权；有且是 <span class="kbd">device</span> = 等 30 秒刷新网页。</p>
+    <p>② 还不行，按「日常维护」重启一次 agent。</p>
+  </div></details>
+
+  <details><summary>macOS 弹窗说「无法验证开发者 / 已阻止使用」</summary><div class="body">
+    <p>系统安全策略拦了自带的插件（正常现象）。「系统设置 → 隐私与安全性」往下翻，对被拦的项目点<b>仍要打开</b>。<b>不要</b>照网上说的全局关闭 Gatekeeper。</p>
+  </div></details>
+</section>
+
+<!-- 日常 -->
+<section class="step" id="daily">
+  <div class="step-head"><div class="step-num">🔁</div><h2>日常维护（就这 3 招）</h2></div>
+  <h3 class="sub">重启 Agent（解决 80% 的问题）</h3>
+  <div class="code"><button class="copy">复制</button><pre>cd ~/matrix-agent
+pkill -f "sonic-agent-.*\.jar"; sleep 2
+nohup java -Dfile.encoding=utf-8 -Dspring.profiles.active=sonic-agent -jar sonic-agent-*.jar > agent.log 2>&1 & disown
+sleep 10 && grep "server auth successful" agent.log   <span class="cmt"># 出现即连上</span></pre></div>
+  <h3 class="sub">看日志（排查问题先看它）</h3>
+  <div class="code"><button class="copy">复制</button><pre>tail -100 ~/matrix-agent/agent.log          <span class="cmt"># 最近 100 行</span>
+grep -i error ~/matrix-agent/agent.log     <span class="cmt"># 只看报错</span></pre></div>
+  <h3 class="sub">升级 Agent</h3>
+  <p>管理员发新 zip 后：解压 → 把里面的 <span class="kbd">jar</span> 和 <span class="kbd">plugins/</span> 覆盖到 ~/matrix-agent（config 别覆盖，你的配置在里面）→ 重启。或直接让管理员给完整新目录，重做第 3 步配置。</p>
+</section>
+
+<footer>Matrix 云真机平台 · Agent 部署小白指南 · 命令与行为基于 sonic-agent v2.7.2 + matrix 定制版（adb 37.0.1 / uiautomator2 10.6.2 / scrcpy 1.23-patched）<br>问题反馈：找你的平台管理员 🙌</footer>
+</div>
+
+<script>
+/* ---------- 复制按钮 ---------- */
+function bindCopy(){
+  document.querySelectorAll('.code').forEach(function(box){
+    var btn=box.querySelector('.copy'); if(!btn) return;
+    btn.addEventListener('click',function(){
+      var pre=box.querySelector('pre');
+      var text=pre.innerText; /* heredoc 命令需整段复制（含首尾行）；纯 yml/命令框原样复制 */
+      function done(){btn.textContent='已复制 ✓';btn.classList.add('ok');setTimeout(function(){btn.textContent='复制';btn.classList.remove('ok')},1600)}
+      if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(text).then(done,fallback)}else{fallback()}
+      function fallback(){var ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();try{document.execCommand('copy');done()}catch(e){}document.body.removeChild(ta)}
+    });
+  });
+}
+/* 注意：第 3 步的 heredoc 命令框需整段复制（含首行 cat 与尾行 EOF） */
+
+/* ---------- 芯片 tabs ---------- */
+var tabs=document.querySelectorAll('.tabs button');
+tabs.forEach(function(t){t.addEventListener('click',function(){
+  tabs.forEach(function(x){x.classList.remove('on')});t.classList.add('on');
+  document.querySelectorAll('.tab-pane').forEach(function(p){p.classList.remove('on')});
+  document.getElementById('tab-'+t.dataset.tab).classList.add('on');
+})});
+
+/* ---------- 配置生成器 ---------- */
+var srv=document.getElementById('srvHost'),key=document.getElementById('agentKey');
+var yml=document.getElementById('ymlText'),ymlInline=document.getElementById('ymlInline');
+var hostHint=document.getElementById('hostHint');
+function hostMode(){var r=document.querySelector('input[name=hostMode]:checked');return r?r.value:'127'}
+function gen(){
+  var h=(srv.value||'PUT-SERVER-IP').trim(),k=(key.value||'PUT-AGENT-KEY').trim();
+  var host=hostMode()==='127'?'127.0.0.1':'192.168.1.100  # ← 换成你的局域网 IP（终端跑 ipconfig getifaddr en0 查）';
+  var y='sonic:\n  agent:\n    host: '+host+'\n    port: 7777\n    key: '+k+'\n  server:\n    host: '+h+'\n    port: 3000\n';
+  yml.textContent=y;
+  ymlInline.textContent=y;
+  hostHint.textContent=hostMode()==='127'
+    ?'✅ 推荐：只有你自己在这台 Mac 的浏览器里看设备。永远不受换 Wi-Fi 换 IP 影响，零维护。'
+    :'🌐 团队都能看：需要 Mac 的局域网 IP，并建议在路由器做 DHCP 保留（不会弄就先选左边）。';
+}
+[srv,key].forEach(function(i){i.addEventListener('input',gen)});
+document.querySelectorAll('input[name=hostMode]').forEach(function(r){r.addEventListener('change',gen)});
+gen();
+
+/* ---------- 进度打勾 + 进度条 ---------- */
+var total=document.querySelectorAll('input[data-chk]').length;
+document.querySelectorAll('input[data-chk]').forEach(function(c){
+  c.addEventListener('change',function(){
+    var sec=c.closest('.step');sec.classList.toggle('done',c.checked);
+    try{localStorage.setItem('agentdeploy-'+c.closest('section').id,c.checked?'1':'0')}catch(e){}
+    var done=document.querySelectorAll('input[data-chk]:checked').length;
+    document.getElementById('progress').style.width=(done/total*100)+'%';
+    if(done===total&&total>0){document.getElementById('progress').style.background='var(--green)'}
+  });
+  try{if(localStorage.getItem('agentdeploy-'+c.closest('section').id)==='1'){c.checked=true;c.closest('.step').classList.add('done')}}catch(e){}
+});
+(function(){var done=document.querySelectorAll('input[data-chk]:checked').length;if(total)document.getElementById('progress').style.width=(done/total*100)+'%';})();
+
+/* ---------- 导航高亮 ---------- */
+var secs=[].slice.call(document.querySelectorAll('section.step'));
+var links=[].slice.call(document.querySelectorAll('nav a'));
+window.addEventListener('scroll',function(){
+  var y=window.scrollY+120,cur=secs[0];
+  secs.forEach(function(s){if(s.offsetTop<=y)cur=s});
+  links.forEach(function(a){a.classList.toggle('cur',a.getAttribute('href')==='#'+cur.id)});
+},{passive:true});
+
+bindCopy();
+</script>
+</body>
+</html>
