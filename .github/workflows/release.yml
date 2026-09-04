@@ -65,11 +65,11 @@ jobs:
             adb: darwin
           - platform: windows-x86
             depend: windows_x86
-            adb: windows
+            adb: win
             tail: .exe
           - platform: windows-x86_64
             depend: windows_x86_64
-            adb: windows
+            adb: win
             tail: .exe
     runs-on: ubuntu-latest
     steps:
@@ -95,14 +95,13 @@ jobs:
         run: cp -r target/sonic-agent-${{ matrix.platform }}.jar sonic-agent-${{ steps.previoustag.outputs.tag }}-${{matrix.depend}}/
       - name: copy
         run: cp -r config/ mini/ sonic-agent-${{ steps.previoustag.outputs.tag }}-${{matrix.depend}}/
+      # adb 直接从 Google 官方源拉取（原 SonicCloudOrg/sonic-adb-binary 已归档，冻结在 r34.0.3）。
+      # ⚠️ 防回退：不要改回 sonic-adb-binary；升级版本号时同步 tools/adb-upgrade/patch-agent-adb.sh 的 TARGET_VERSION。
+      # 注意：windows 官方包名后缀是 -win 不是 -windows。
       - name: adb-download
-        uses: robinraju/release-downloader@v1.4
-        with:
-          repository: SonicCloudOrg/sonic-adb-binary
-          latest: true
-          fileName: "*"
+        run: curl -fsSL --retry 3 -o platform-tools.zip "https://dl.google.com/android/repository/platform-tools_r37.0.1-${{matrix.adb}}.zip"
       - name: adb-unzip
-        run: unzip platform-tools_r34.0.3-${{matrix.adb}}.zip && mv platform-tools/* sonic-agent-${{ steps.previoustag.outputs.tag }}-${{matrix.depend}}/plugins/
+        run: unzip -q platform-tools.zip && mv platform-tools/* sonic-agent-${{ steps.previoustag.outputs.tag }}-${{matrix.depend}}/plugins/
       - name: sas-download
         uses: robinraju/release-downloader@v1.4
         with:
