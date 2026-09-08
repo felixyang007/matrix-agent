@@ -26,6 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.cloud.sonic.agent.bridge.ios.IOSDeviceLocalStatus;
 import org.cloud.sonic.agent.bridge.ios.IOSDeviceThreadPool;
 import org.cloud.sonic.agent.bridge.ios.SibTool;
+import org.cloud.sonic.agent.bridge.ios.SimctlTool;
 import org.cloud.sonic.agent.common.config.WsEndpointConfigure;
 import org.cloud.sonic.agent.common.interfaces.DeviceStatus;
 import org.cloud.sonic.agent.common.maps.DevicesLockMap;
@@ -90,7 +91,7 @@ public class IOSWSServer implements IIOSWSServer {
         log.info("ios lock udId：{}", udId);
         IOSDeviceLocalStatus.startDebug(udId);
 
-        if (!SibTool.getDeviceList().contains(udId)) {
+        if (!SimctlTool.isIOSDevice(udId)) {
             log.info("Target device is not connecting, please check the connection.");
             return;
         }
@@ -125,11 +126,13 @@ public class IOSWSServer implements IIOSWSServer {
         }, BytesTool.remoteTimeout));
 
         saveUdIdMapAndSet(session, udId);
-        if (SibTool.getOrientation(udId) != 1) {
-            SibTool.launch(udId, "com.apple.springboard");
+        if (!SimctlTool.isSimulator(udId)) {
+            if (SibTool.getOrientation(udId) != 1) {
+                SibTool.launch(udId, "com.apple.springboard");
+            }
         }
-        int[] ports = SibTool.startWda(udId);
-        if (ports[0] != 0) {
+        int[] ports = SimctlTool.startWdaDispatch(udId);
+        if (ports[0] != 0 && !SimctlTool.isSimulator(udId)) {
             SibTool.orientationWatcher(udId, session);
         }
 
@@ -160,7 +163,9 @@ public class IOSWSServer implements IIOSWSServer {
             }
         });
 
-        SibTool.startShare(udId, session);
+        if (!SimctlTool.isSimulator(udId)) {
+            SibTool.startShare(udId, session);
+        }
 
     }
 

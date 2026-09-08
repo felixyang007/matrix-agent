@@ -20,6 +20,7 @@ package org.cloud.sonic.agent.tests;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import org.cloud.sonic.agent.bridge.ios.SibTool;
+import org.cloud.sonic.agent.bridge.ios.SimctlTool;
 import org.cloud.sonic.agent.common.interfaces.DeviceStatus;
 import org.cloud.sonic.agent.tests.handlers.IOSStepHandler;
 import org.cloud.sonic.agent.tests.ios.IOSTestTaskBootThread;
@@ -52,7 +53,7 @@ public class IOSTests {
         List<JSONObject> dataProvider = new ArrayList<>();
         for (JSONObject device : dataInfo.getJSONArray("device").toJavaList(JSONObject.class)) {
             String udId = device.getString("udId");
-            if (!SibTool.getDeviceList().contains(udId)) {
+            if (!SimctlTool.isIOSDevice(udId)) {
                 continue;
             }
             JSONObject deviceTestData = new JSONObject();
