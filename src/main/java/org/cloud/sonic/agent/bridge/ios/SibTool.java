@@ -336,6 +336,10 @@ public class SibTool implements ApplicationListener<ContextRefreshedEvent> {
     }
 
     public static void install(String udId, String path) {
+        if (SimctlTool.isSimulator(udId)) {
+            SimctlTool.install(udId, path);
+            return;
+        }
         String commandLine;
         if (isUpperThanIos17(udId)) {
             commandLine = String.format("ideviceinstaller -u %s -i %s", udId, path);
@@ -346,6 +350,10 @@ public class SibTool implements ApplicationListener<ContextRefreshedEvent> {
     }
 
     public static void stopSysLog(String udId) {
+        if (SimctlTool.isSimulator(udId)) {
+            SimctlTool.stopSysLog(udId);
+            return;
+        }
         String processName = String.format("process-%s-syslog", udId);
         if (GlobalProcessMap.getMap().get(processName) != null) {
             Process ps = GlobalProcessMap.getMap().get(processName);
@@ -355,6 +363,10 @@ public class SibTool implements ApplicationListener<ContextRefreshedEvent> {
     }
 
     public static void getSysLog(String udId, String filter, Session session) {
+        if (SimctlTool.isSimulator(udId)) {
+            SimctlTool.getSysLog(udId, filter, session);
+            return;
+        }
         new Thread(() -> {
             stopSysLog(udId);
             String system = System.getProperty("os.name").toLowerCase();
@@ -470,10 +482,16 @@ public class SibTool implements ApplicationListener<ContextRefreshedEvent> {
     }
 
     public static List<String> getAppList(String udId) {
+        if (SimctlTool.isSimulator(udId)) {
+            return SimctlTool.getAppList(udId);
+        }
         return getAppList(udId, null).stream().map(e -> e.getString("bundleId")).collect(Collectors.toList());
     }
 
     public static List<JSONObject> getAppList(String udId, Session session) {
+        if (SimctlTool.isSimulator(udId)) {
+            return SimctlTool.getAppList(udId, session);
+        }
         List<JSONObject> result = new ArrayList<>();
         Process appListProcess = null;
         String commandLine = "%s app list -u %s -j -i";
@@ -576,11 +594,19 @@ public class SibTool implements ApplicationListener<ContextRefreshedEvent> {
     }
 
     public static void locationUnset(String udId) {
+        if (SimctlTool.isSimulator(udId)) {
+            SimctlTool.locationUnset(udId);
+            return;
+        }
         String commandLine = "%s location unset -u %s";
         ProcessCommandTool.getProcessLocalCommand(String.format(commandLine, sib, udId));
     }
 
     public static void locationSet(String udId, String longitude, String latitude) {
+        if (SimctlTool.isSimulator(udId)) {
+            SimctlTool.locationSet(udId, longitude, latitude);
+            return;
+        }
         String commandLine = "%s location set -u %s --long %s --lat %s";
         ProcessCommandTool.getProcessLocalCommand(String.format(commandLine, sib, udId, longitude, latitude));
     }
@@ -592,16 +618,28 @@ public class SibTool implements ApplicationListener<ContextRefreshedEvent> {
     }
 
     public static void launch(String udId, String pkg) {
+        if (SimctlTool.isSimulator(udId)) {
+            SimctlTool.launch(udId, pkg);
+            return;
+        }
         String commandLine = "%s app launch -u %s -b %s";
         ProcessCommandTool.getProcessLocalCommand(String.format(commandLine, sib, udId, pkg));
     }
 
     public static void kill(String udId, String pkg) {
+        if (SimctlTool.isSimulator(udId)) {
+            SimctlTool.terminate(udId, pkg);
+            return;
+        }
         String commandLine = "%s app kill -u %s -b %s";
         ProcessCommandTool.getProcessLocalCommand(String.format(commandLine, sib, udId, pkg));
     }
 
     public static void uninstall(String udId, String pkg) {
+        if (SimctlTool.isSimulator(udId)) {
+            SimctlTool.uninstall(udId, pkg);
+            return;
+        }
         String commandLine;
         if (isUpperThanIos17(udId)) {
             commandLine = String.format("ideviceinstaller -u %s -U %s", udId, pkg);

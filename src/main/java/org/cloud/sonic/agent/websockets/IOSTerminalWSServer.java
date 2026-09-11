@@ -24,6 +24,7 @@ import jakarta.websocket.server.PathParam;
 import jakarta.websocket.server.ServerEndpoint;
 import lombok.extern.slf4j.Slf4j;
 import org.cloud.sonic.agent.bridge.ios.SibTool;
+import org.cloud.sonic.agent.bridge.ios.SimctlTool;
 import org.cloud.sonic.agent.common.config.WsEndpointConfigure;
 import org.cloud.sonic.agent.common.maps.WebSocketSessionMap;
 import org.cloud.sonic.agent.tools.BytesTool;
@@ -51,7 +52,7 @@ public class IOSTerminalWSServer implements IIOSWSServer {
             return;
         }
 
-        if (!SibTool.getDeviceList().contains(udId)) {
+        if (!SimctlTool.isIOSDevice(udId)) {
             log.info("Target device is not connecting, please check the connection.");
             return;
         }

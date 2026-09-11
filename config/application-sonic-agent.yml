@@ -19,3 +19,11 @@ modules:
     wda-bundle-id: com.sonic.WebDriverAgentRunner
     # (mac only) Replace with the xcode project path of wda. | 替换为wda的xcode project目录
     wda-xcode-project-path: WebdriverAgent/WebDriverAgent.xcodeproj
+    # Xcode Simulator module | Xcode 模拟器模块
+    simulator:
+      # Enable simulator discovery & reporting (mac only, requires Xcode installed) | 是否启用模拟器发现与上报（仅 Mac，需已装 Xcode）
+      enabled: false
+      # Poll interval of `simctl list devices` in seconds | 模拟器发现轮询间隔（秒）
+      poll-interval-seconds: 10
+      # Reset each simulator to factory state before every test task | 每任务全新实例：测试前将模拟器 erase 回出厂态
+      fresh-instance-per-task: false

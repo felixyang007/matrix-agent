@@ -20,6 +20,7 @@ package org.cloud.sonic.agent.tests.ios;
 import com.alibaba.fastjson.JSONObject;
 import org.cloud.sonic.agent.bridge.ios.IOSDeviceLocalStatus;
 import org.cloud.sonic.agent.bridge.ios.SibTool;
+import org.cloud.sonic.agent.bridge.ios.SimctlTool;
 import org.cloud.sonic.agent.common.interfaces.ResultDetailStatus;
 import org.cloud.sonic.agent.tests.TaskManager;
 import org.cloud.sonic.agent.tests.handlers.IOSStepHandler;
@@ -177,9 +178,14 @@ public class IOSTestTaskBootThread extends Thread {
             }
 
             startTestSuccess = true;
+            // 每任务全新实例：模拟器测试前 erase 回出厂态，规避环境污染导致的 flaky
+            if (SimctlTool.isSimulator(udId) && SimctlTool.isFreshInstancePerTask()) {
+                log.info("Fresh-instance policy: erasing simulator {} before test", udId);
+                SimctlTool.eraseAndBoot(udId);
+            }
             //启动测试
             try {
-                int wdaPort = SibTool.startWda(udId)[0];
+                int wdaPort = SimctlTool.startWdaDispatch(udId)[0];
                 iosStepHandler.startIOSDriver(udId, wdaPort);
             } catch (Exception e) {
                 log.error(e.getMessage());

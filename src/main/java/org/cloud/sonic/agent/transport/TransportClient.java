@@ -29,6 +29,7 @@ import org.cloud.sonic.agent.bridge.android.AndroidDeviceLocalStatus;
 import org.cloud.sonic.agent.bridge.android.AndroidSupplyTool;
 import org.cloud.sonic.agent.bridge.ios.IOSDeviceLocalStatus;
 import org.cloud.sonic.agent.bridge.ios.SibTool;
+import org.cloud.sonic.agent.bridge.ios.SimctlTool;
 import org.cloud.sonic.agent.common.enums.AndroidKey;
 import org.cloud.sonic.agent.common.interfaces.DeviceStatus;
 import org.cloud.sonic.agent.common.interfaces.PlatformType;
@@ -134,7 +135,7 @@ public class TransportClient extends WebSocketClient {
                             log.info("ios lock udId：{}", udId);
                             IOSDeviceLocalStatus.startDebug(udId);
 
-                            if (!SibTool.getDeviceList().contains(udId)) {
+                            if (!SimctlTool.isIOSDevice(udId)) {
                                 log.info("Target device is not connecting, please check the connection.");
                                 return;
                             }
@@ -143,13 +144,17 @@ public class TransportClient extends WebSocketClient {
                             int wdaPort = jsonObject.getInteger("wdaServerRemotePort");
                             int wdaMjpegPort = jsonObject.getInteger("wdaMjpegRemotePort");
 
-                            if (sibPort != 0) {
+                            if (sibPort != 0 && !SimctlTool.isSimulator(udId)) {
                                 SibTool.startShare(udId, sibPort);
                             }
 
                             if (wdaPort != 0 || wdaMjpegPort != 0) {
                                 try {
-                                    SibTool.startWda(udId, wdaPort, wdaMjpegPort);
+                                    if (SimctlTool.isSimulator(udId)) {
+                                        SimctlTool.startWda(udId, wdaPort, wdaMjpegPort);
+                                    } else {
+                                        SibTool.startWda(udId, wdaPort, wdaMjpegPort);
+                                    }
                                 } catch (IOException | InterruptedException e) {
                                     log.error(e.getMessage());
                                 }
@@ -272,6 +277,14 @@ public class TransportClient extends WebSocketClient {
                                 IOSDeviceLocalStatus.send(u, DeviceStatus.ONLINE);
                             }
                         }
+                        for (String u : SimctlTool.getDeviceList()) {
+                            String status = IOSDeviceManagerMap.getMap().get(u);
+                            if (status != null) {
+                                IOSDeviceLocalStatus.send(u, status);
+                            } else {
+                                IOSDeviceLocalStatus.send(u, DeviceStatus.ONLINE);
+                            }
+                        }
                     } else {
                         TransportWorker.isKeyAuth = false;
                         log.info("server auth failed!");
@@ -286,8 +299,13 @@ public class TransportClient extends WebSocketClient {
                         }
                     }
                     if (jsonObject.getInteger("platform") == PlatformType.IOS) {
-                        if (SibTool.getDeviceList().contains(jsonObject.getString("udId"))) {
-                            SibTool.reboot(jsonObject.getString("udId"));
+                        String rebootUdId = jsonObject.getString("udId");
+                        if (SimctlTool.isIOSDevice(rebootUdId)) {
+                            if (SimctlTool.isSimulator(rebootUdId)) {
+                                SimctlTool.reboot(rebootUdId);
+                            } else {
+                                SibTool.reboot(rebootUdId);
+                            }
                         }
                     }
                 }
