@@ -120,13 +120,13 @@ a{color:var(--blue)}
   <div class="wrap">
     <h1>🤖 Matrix Agent 部署指南</h1>
     <p>把你的 Mac 变成一台「远程设备机」——插上手机，团队就能在网页上远程控制真机、跑自动化测试。</p>
-    <span class="badge">⏱ 约 15 分钟</span><span class="badge">💻 Mac / Linux 通用</span><span class="badge">🧑‍💻 无需编程基础</span>
+    <span class="badge">⏱ 约 15 分钟</span><span class="badge">💻 Mac / Linux 通用</span><span class="badge">🧑‍💻 无需编程基础</span><span class="badge">🍎 可选 iOS 模拟器</span>
     <p style="margin-top:16px;font-size:13.5px;opacity:.85">所有命令都可以直接复制，粘贴到「终端」App 里按回车。右上角的「☑ 完成」可以打勾记录进度（自动保存）。</p>
   </div>
 </header>
 
 <nav><div class="wrap">
-  <a href="#prep">准备</a><a href="#s1">① Java</a><a href="#s2">② 下载</a><a href="#s3">③ 配置</a><a href="#s4">④ 启动</a><a href="#s5">⑤ 接设备</a><a href="#faq">出问题了？</a><a href="#daily">日常维护</a>
+  <a href="#prep">准备</a><a href="#s1">① Java</a><a href="#s2">② 下载</a><a href="#s3">③ 配置</a><a href="#s4">④ 启动</a><a href="#s5">⑤ 接设备</a><a href="#ios-sim">🍎 iOS 模拟器</a><a href="#faq">出问题了？</a><a href="#daily">日常维护</a>
 </div></nav>
 
 <div class="wrap">
@@ -250,8 +250,66 @@ disown</pre></div>
 ABC123XYZ      device product:… model:…    <span class="good">✅ 认到了（状态必须是 device）</span>
 ABC123XYZ      unauthorized               <span class="bad">→ 看手机屏幕，点掉授权弹窗</span></div>
   <p>等十几秒，平台网页「设备中心」里你的手机就会变<b>在线</b> 🎉 点「远程控制」试试——能看到画面、能用鼠标操控，就全部完成了。</p>
-  <div class="tip">💡 <b>模拟器也行</b>：在这台 Mac 上开 Android Studio 模拟器，等同于一台插着的设备，自动被识别。</div>
+  <div class="tip">💡 <b>模拟器也行</b>：Android 模拟器（Android Studio）开起来等同真机，自动识别；<b>iOS 模拟器</b>（Xcode 自带）见下方 <a href="#ios-sim">🍎 iOS 模拟器</a> 一节。</div>
   <div class="ok-box">🎉 <b>部署完成！</b>现在你可以：网页远程控制真机 / 跑自动化用例 / 给团队成员分配这台设备。往下翻有「日常维护」和「出问题了？」两节，建议收藏本页。</div>
+</section>
+
+<!-- iOS 模拟器（进阶） -->
+<section class="step" id="ios-sim">
+  <div class="step-head"><div class="step-num">🍎</div><h2>进阶：接入 iOS 模拟器（Xcode Simulator）</h2>
+    <label class="chk"><input type="checkbox" data-chk>完成</label></div>
+  <p>不想插 iPhone 真机？Mac 上 Xcode 自带的<b>模拟器</b>也能跑 iOS 自动化——适合冒烟、快速回归。进设备池后和真机一样远程操作、跑用例（名字下方带「模拟器」小标）。</p>
+  <div class="warn-box">⚠️ 前提：<b>Apple 芯片 Mac</b>（M1/M2/M3/M4）+ 已装 <b>Xcode</b>（含至少一个 iOS 模拟器 runtime）。Intel Mac / 没装 Xcode 的跳过本节。</div>
+
+  <h3 class="sub">第 1 步：起一个模拟器</h3>
+  <p>先看本机有哪些模拟器设备：</p>
+  <div class="code"><button class="copy">复制</button><pre>xcodebuild -version
+xcrun simctl list devices</pre></div>
+  <div class="out">== Devices ==
+-- iOS 18.0 --
+    iPhone 15 Pro (5E2756F8-3B79-42A3-A66A-C01509258A07) (Shutdown)   <span class="good">✅ 有就直接用</span></div>
+  <p>没有想要的机型就新建并启动（机型名可换成 iPhone 16 / 17 等）：</p>
+  <div class="code"><button class="copy">复制</button><pre>xcrun simctl create "Matrix-iOS-1" "com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro" iOS-18.0
+<span class="cmt"># ↑ 会输出一串 udid（字母数字），下面 boot 用</span>
+xcrun simctl boot "把上面输出的 udid 贴这里"</pre></div>
+  <div class="tip">💡 看有哪些机型可开：<span class="kbd">xcrun simctl list devicetypes</span>；要常开多个模拟器就重复 create + boot 几次（一台 M 系 Mac 建议 4–6 个）。</div>
+
+  <h3 class="sub">第 2 步：准备 WDA 工程（WebDriverAgent）</h3>
+  <p>模拟器跑自动化要经过 <b>WDA</b>（苹果的测试驱动）。Agent 会自动编译并拉起它，但你得先把 WDA 工程放到这台 Mac 上：</p>
+  <div class="code"><button class="copy">复制</button><pre>cd ~ && git clone https://github.com/SonicCloudOrg/sonic-ios-wda.git
+<span class="cmt"># 克隆后工程路径 = ~/sonic-ios-wda/WebDriverAgent.xcodeproj</span></pre></div>
+  <div class="tip">💡 首次跑用例时 Agent 会自动<b>编译一次 WDA</b>（约 1–2 分钟），之后复用缓存；Xcode 26 的编译兼容参数 Agent 已内置，无需你手动处理。</div>
+
+  <h3 class="sub">第 3 步：让 Agent 认识模拟器 + WDA</h3>
+  <p>往配置文件<b>追加</b>一段（一条命令搞定，不用学编辑器）：</p>
+  <div class="code"><button class="copy">复制</button><pre>cat >> ~/matrix-agent/config/application-sonic-agent.yml &lt;&lt;'EOF'
+modules:
+  ios:
+    wda-xcode-project-path: ~/sonic-ios-wda/WebDriverAgent.xcodeproj
+    simulator:
+      enabled: true
+      poll-interval-seconds: 10
+      fresh-instance-per-task: false
+EOF</pre></div>
+  <div class="warn-box">⚠️ 若第 4 步报「找不到 WDA 工程」，把 path 换成完整路径：先跑 <span class="kbd">cd ~/sonic-ios-wda && pwd</span>，用输出的路径（如 /Users/tom/sonic-ios-wda/WebDriverAgent.xcodeproj）替换 <span class="kbd">~/...</span>。</div>
+
+  <h3 class="sub">第 4 步：重启 Agent 并确认</h3>
+  <div class="code"><button class="copy">复制</button><pre>cd ~/matrix-agent
+pkill -f "sonic-agent-.*\.jar"; sleep 2
+nohup java -Dfile.encoding=utf-8 -Dspring.profiles.active=sonic-agent -jar sonic-agent-*.jar > agent.log 2>&1 & disown
+sleep 10 && grep -E "Enable iOS Simulator module|server auth successful" agent.log</pre></div>
+  <div class="out">… Enable iOS Simulator module   <span class="good">✅ 模拟器模块已加载</span>
+… server auth successful!       <span class="good">✅ 连上服务器</span></div>
+  <p>打开平台「设备中心」，你 boot 的模拟器会以 <b>iOS</b> 出现（带「模拟器」小标），状态<b>在线</b>。</p>
+
+  <h3 class="sub">第 5 步：跑远程自动化</h3>
+  <ol>
+    <li>设备中心对模拟器点<b>「远程控制」</b>——能看到画面、能鼠标点按（画面走 WDA，无需 USB）。</li>
+    <li>「安装」App 时选<b>模拟器专用包</b>（不是真机包）。</li>
+    <li>写/跑用例与真机流程完全一样，选中这台模拟器下发即可。</li>
+  </ol>
+  <div class="warn-box">⚠️ 两条边界：① 模拟器只能装 <b>simulator 构建的包</b>（真机 arm64 IPA 装不进去）；② 支付 / 推送 / 生物识别 / 风控类用例在模拟器上<b>行为不可信</b>，请走真机。</div>
+  <div class="ok-box">🎉 完成！模拟器适合 <b>冒烟 / 快速回归 / 兼容性初筛</b>（快、零成本）；关键流程仍建议真机验证。</div>
 </section>
 
 <!-- FAQ -->
