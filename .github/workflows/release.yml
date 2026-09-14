@@ -118,19 +118,22 @@ jobs:
           fileName: "*"
       - name: sgm-untar
         run: tar zxvf *_${{matrix.depend}}.tar.gz && rm *_${{matrix.depend}}.tar.gz && mv sonic-go-mitmproxy${{matrix.tail}} sonic-agent-${{ steps.previoustag.outputs.tag }}-${{matrix.depend}}/plugins/sonic-go-mitmproxy${{matrix.tail}}
+      # sib 原 SonicCloudOrg/sonic-ios-bridge 已归档，冻结在 v1.3.20；资产已原样搬运到自己账号下的 fork
+      # （fork 不会带过来 Release/资产，是手动 mirror 上去的），统一从自己仓库拉取。
       - name: sib-download
         uses: robinraju/release-downloader@v1.4
         with:
-          repository: SonicCloudOrg/sonic-ios-bridge
-          latest: true
+          repository: felixyang007/matrix-ios-bridge
+          tag: v1.3.20
           fileName: "*"
       - name: sib-untar
         run: tar zxvf *_${{matrix.depend}}.tar.gz && rm *_${{matrix.depend}}.tar.gz && mv sib${{matrix.tail}} sonic-agent-${{ steps.previoustag.outputs.tag }}-${{matrix.depend}}/plugins/sonic-ios-bridge${{matrix.tail}}
+      # saa 原 SonicCloudOrg/sonic-android-apk 已归档，冻结在 v2.0.8；资产已原样搬运到自己账号下的 fork，同上。
       - name: saa-download
         uses: robinraju/release-downloader@v1.4
         with:
-          repository: SonicCloudOrg/sonic-android-apk
-          latest: true
+          repository: felixyang007/matrix-android-apk
+          tag: v2.0.8
           fileName: "sonic-android-apk.apk"
       - name: saa
         run: cp sonic-android-apk.apk sonic-agent-${{ steps.previoustag.outputs.tag }}-${{matrix.depend}}/plugins/
