@@ -275,10 +275,11 @@ xcrun simctl boot "把上面输出的 udid 贴这里"</pre></div>
   <div class="tip">💡 看有哪些机型可开：<span class="kbd">xcrun simctl list devicetypes</span>；要常开多个模拟器就重复 create + boot 几次（一台 M 系 Mac 建议 4–6 个）。</div>
 
   <h3 class="sub">第 2 步：准备 WDA 工程（WebDriverAgent）</h3>
-  <p>模拟器跑自动化要经过 <b>WDA</b>（苹果的测试驱动）。Agent 会自动编译并拉起它，但你得先把 WDA 工程放到这台 Mac 上：</p>
-  <div class="code"><button class="copy">复制</button><pre>cd ~ && git clone https://github.com/felixyang007/matrix-ios-wda.git
+  <p>模拟器跑自动化要经过 <b>WDA</b>（苹果的测试驱动）。Agent 会自动编译并拉起它，但你得先把我们维护的 WDA 工程（仓库 <span class="kbd">felixyang007/matrix-ios-wda</span>）放到这台 Mac 上：</p>
+  <div class="code"><button class="copy">复制</button><pre>cd ~ && git clone git@github.com:felixyang007/matrix-ios-wda.git
 <span class="cmt"># 克隆后工程路径 = ~/matrix-ios-wda/WebDriverAgent.xcodeproj</span></pre></div>
-  <div class="tip">💡 首次跑用例时 Agent 会自动<b>编译一次 WDA</b>（约 1–2 分钟），之后复用缓存；Xcode 26 的编译兼容参数 Agent 已内置，无需你手动处理。</div>
+  <div class="warn-box">⚠️ 这是私有仓库。SSH 方式需先配好 GitHub SSH key；没配就用 HTTPS：<span class="kbd">git clone https://github.com/felixyang007/matrix-ios-wda.git</span>（首次会弹 GitHub 登录）。都没权限就让管理员把 matrix-ios-wda 目录打包发你，解压到 <span class="kbd">~/</span> 一样能用。</div>
+  <div class="tip">💡 首次跑用例时 Agent 会自动<b>编译一次 WDA</b>（约 1–2 分钟），之后复用缓存。</div>
 
   <h3 class="sub">第 3 步：让 Agent 认识模拟器 + WDA</h3>
   <p>往配置文件<b>追加</b>一段（一条命令搞定，不用学编辑器）：</p>
