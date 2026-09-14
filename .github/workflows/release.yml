@@ -102,19 +102,21 @@ jobs:
         run: curl -fsSL --retry 3 -o platform-tools.zip "https://dl.google.com/android/repository/platform-tools_r37.0.1-${{matrix.adb}}.zip"
       - name: adb-unzip
         run: unzip -q platform-tools.zip && mv platform-tools/* sonic-agent-${{ steps.previoustag.outputs.tag }}-${{matrix.depend}}/plugins/
+      # sas 原 SonicCloudOrg/sonic-android-supply 已归档，冻结在 v0.1.12；资产已原样搬运到自己账号下的 fork，同上。
       - name: sas-download
         uses: robinraju/release-downloader@v1.4
         with:
-          repository: SonicCloudOrg/sonic-android-supply
-          latest: true
+          repository: felixyang007/matrix-android-supply
+          tag: v0.1.12
           fileName: "*"
       - name: sas-untar
         run: tar zxvf *_${{matrix.depend}}.tar.gz && rm *_${{matrix.depend}}.tar.gz && mv sas${{matrix.tail}} sonic-agent-${{ steps.previoustag.outputs.tag }}-${{matrix.depend}}/plugins/sonic-android-supply${{matrix.tail}}
+      # sgm 原 SonicCloudOrg/sonic-go-mitmproxy 已归档，冻结在 v1.3.4；资产已原样搬运到自己账号下的 fork，同上。
       - name: sgm-download
         uses: robinraju/release-downloader@v1.4
         with:
-          repository: SonicCloudOrg/sonic-go-mitmproxy
-          latest: true
+          repository: felixyang007/matrix-go-mitmproxy
+          tag: v1.3.4
           fileName: "*"
       - name: sgm-untar
         run: tar zxvf *_${{matrix.depend}}.tar.gz && rm *_${{matrix.depend}}.tar.gz && mv sonic-go-mitmproxy${{matrix.tail}} sonic-agent-${{ steps.previoustag.outputs.tag }}-${{matrix.depend}}/plugins/sonic-go-mitmproxy${{matrix.tail}}
