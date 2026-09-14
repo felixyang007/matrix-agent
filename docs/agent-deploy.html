@@ -276,8 +276,8 @@ xcrun simctl boot "把上面输出的 udid 贴这里"</pre></div>
 
   <h3 class="sub">第 2 步：准备 WDA 工程（WebDriverAgent）</h3>
   <p>模拟器跑自动化要经过 <b>WDA</b>（苹果的测试驱动）。Agent 会自动编译并拉起它，但你得先把 WDA 工程放到这台 Mac 上：</p>
-  <div class="code"><button class="copy">复制</button><pre>cd ~ && git clone https://github.com/SonicCloudOrg/sonic-ios-wda.git
-<span class="cmt"># 克隆后工程路径 = ~/sonic-ios-wda/WebDriverAgent.xcodeproj</span></pre></div>
+  <div class="code"><button class="copy">复制</button><pre>cd ~ && git clone https://github.com/felixyang007/matrix-ios-wda.git
+<span class="cmt"># 克隆后工程路径 = ~/matrix-ios-wda/WebDriverAgent.xcodeproj</span></pre></div>
   <div class="tip">💡 首次跑用例时 Agent 会自动<b>编译一次 WDA</b>（约 1–2 分钟），之后复用缓存；Xcode 26 的编译兼容参数 Agent 已内置，无需你手动处理。</div>
 
   <h3 class="sub">第 3 步：让 Agent 认识模拟器 + WDA</h3>
@@ -285,13 +285,13 @@ xcrun simctl boot "把上面输出的 udid 贴这里"</pre></div>
   <div class="code"><button class="copy">复制</button><pre>cat >> ~/matrix-agent/config/application-sonic-agent.yml &lt;&lt;'EOF'
 modules:
   ios:
-    wda-xcode-project-path: ~/sonic-ios-wda/WebDriverAgent.xcodeproj
+    wda-xcode-project-path: ~/matrix-ios-wda/WebDriverAgent.xcodeproj
     simulator:
       enabled: true
       poll-interval-seconds: 10
       fresh-instance-per-task: false
 EOF</pre></div>
-  <div class="warn-box">⚠️ 若第 4 步报「找不到 WDA 工程」，把 path 换成完整路径：先跑 <span class="kbd">cd ~/sonic-ios-wda && pwd</span>，用输出的路径（如 /Users/tom/sonic-ios-wda/WebDriverAgent.xcodeproj）替换 <span class="kbd">~/...</span>。</div>
+  <div class="warn-box">⚠️ 若第 4 步报「找不到 WDA 工程」，把 path 换成完整路径：先跑 <span class="kbd">cd ~/matrix-ios-wda && pwd</span>，用输出的路径（如 /Users/tom/matrix-ios-wda/WebDriverAgent.xcodeproj）替换 <span class="kbd">~/...</span>。</div>
 
   <h3 class="sub">第 4 步：重启 Agent 并确认</h3>
   <div class="code"><button class="copy">复制</button><pre>cd ~/matrix-agent

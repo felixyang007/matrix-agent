@@ -75,7 +75,7 @@
   license: [Apache 2.0 License](licenses/LICENSE.appium-uiautomator2-server)
 - sonic-go-mitmproxy 来自 sonic-go-mitmproxy fork from [go-mitmproxy](https://github.com/lqqyt2423/go-mitmproxy)
   license: [MIT License](licenses/LICENSE.go-mitmproxy)
-- WebDriverAgent 来自 sonic-ios-wda fork from [WebDriverAgent](https://github.com/appium/WebDriverAgent)
+- WebDriverAgent 来自 matrix-ios-wda fork from [WebDriverAgent](https://github.com/appium/WebDriverAgent)
   license: [BSD License](licenses/LICENSE.WebDriverAgent)
 - Poco-SDK 来自 sonic-sdk-poco fork from [Poco-SDK](https://github.com/AirtestProject/Poco-SDK)
   license: [Apache 2.0 License](licenses/LICENSE.Poco-SDK)

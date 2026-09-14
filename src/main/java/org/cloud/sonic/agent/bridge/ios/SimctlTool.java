@@ -436,7 +436,7 @@ public class SimctlTool implements ApplicationListener<ContextRefreshedEvent> {
      * <p>Port injection relies on USE_PORT / MJPEG_SERVER_PORT being honoured
      * by the WDA runner environment. For a single instance the scheme defaults
      * (8100 / 9100) work as-is; multi-instance port injection is a P1 item to
-     * verify against the sonic-ios-wda scheme.</p>
+     * verify against the matrix-ios-wda scheme.</p>
      */
     public static int[] startWda(String udId, int wdaPort, int mjpegPort) throws IOException, InterruptedException {
         List<Process> processList = IOSProcessMap.getMap().get(udId);
