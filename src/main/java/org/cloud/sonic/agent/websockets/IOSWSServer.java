@@ -170,8 +170,11 @@ public class IOSWSServer implements IIOSWSServer {
     }
 
     @OnClose
-    public void onClose(Session session) {
-        String udId = (String) session.getUserProperties().get("udId");
+    public void onClose(Session session, @PathParam("udId") String udId) {
+        // 同 AndroidWSServer：udId 从 @PathParam 直接取，不依赖 onOpen 是否走到
+        // session.getUserProperties().put("udId", ...) 那一步——onOpen 在拿锁成功后
+        // 仍有 early-return 分支（isIOSDevice 检测失败等），那些分支下这里原来读出来是 null，
+        // 导致 unlockAndRemoveByUdId 在 Assert.hasText 上抛异常，锁永久不释放。
         try {
             exit(session);
         } finally {
@@ -500,6 +503,10 @@ public class IOSWSServer implements IIOSWSServer {
     private void exit(Session session) {
         synchronized (session) {
             ScheduledFuture<?> future = (ScheduledFuture<?>) session.getUserProperties().get("schedule");
+            if (future == null) {
+                // onOpen 在设置 schedule 之前就 early-return 了，后面字段都还没初始化，无需清理。
+                return;
+            }
             future.cancel(true);
             String udId = udIdMap.get(session);
             screenMap.remove(udId);

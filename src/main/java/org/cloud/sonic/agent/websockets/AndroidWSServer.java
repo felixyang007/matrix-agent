@@ -141,8 +141,13 @@ public class AndroidWSServer implements IAndroidWSServer {
     }
 
     @OnClose
-    public void onClose(Session session) {
-        String udId = (String) session.getUserProperties().get("udId");
+    public void onClose(Session session, @PathParam("udId") String udId) {
+        // udId 从 @PathParam 直接取（而不是 session.getUserProperties()），
+        // 因为 onOpen 在锁获取成功后仍有 early-return 分支（如设备未连接）——
+        // 那些分支跑不到把 udId 写进 session properties 那一步，之前这里读出来是 null，
+        // 导致 DevicesLockMap.unlockAndRemoveByUdId 直接在 Assert.hasText 上抛异常，
+        // 锁永远不释放（该设备之后每次都要等 30s tryAcquire 超时）。见 onOpen 里的
+        // lockSuccess 判断到 session.getUserProperties().put("udId", ...) 之间那段。
         try {
             exit(session);
         } finally {
@@ -436,6 +441,11 @@ public class AndroidWSServer implements IAndroidWSServer {
     private void exit(Session session) {
         synchronized (session) {
             ScheduledFuture<?> future = (ScheduledFuture<?>) session.getUserProperties().get("schedule");
+            if (future == null) {
+                // onOpen 在设置 schedule 之前就 early-return 了（鉴权/拿锁/设备检测未过），
+                // 后面这些字段（udId、iDevice、driver 等）都还没初始化，没什么需要清理的。
+                return;
+            }
             future.cancel(true);
             AndroidDeviceLocalStatus.finish(session.getUserProperties().get("udId") + "");
             IDevice iDevice = udIdMap.get(session);
