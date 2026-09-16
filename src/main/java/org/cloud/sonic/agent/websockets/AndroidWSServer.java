@@ -84,6 +84,10 @@ public class AndroidWSServer implements IAndroidWSServer {
             return;
         }
         log.info("android lock udId：{}", udId);
+        // 标记"这次 onOpen 真的拿到了这个 udId 的锁"——onClose/exit 靠这个判断能不能碰
+        // DevicesLockMap / AndroidDeviceLocalStatus 的共享状态；lockSuccess=false 时
+        // 锁属于别的活跃会话，绝不能在这次关闭时误释放/误回退它的状态。
+        session.getUserProperties().put("lockAcquired", Boolean.TRUE);
         AndroidDeviceLocalStatus.startDebug(udId);
 
         IDevice iDevice = AndroidDeviceBridgeTool.getIDeviceByUdId(udId);
@@ -110,7 +114,7 @@ public class AndroidWSServer implements IAndroidWSServer {
                 JSONObject errMsg = new JSONObject();
                 errMsg.put("msg", "error");
                 BytesTool.sendText(session, errMsg.toJSONString());
-                exit(session);
+                exit(session, udId, true); // 走到这里必然已经拿到锁（见 onOpen 前半段）
                 AndroidDeviceBridgeTool.pressKey(iDevice, AndroidKey.HOME);
             }
         }, BytesTool.remoteTimeout));
@@ -142,17 +146,24 @@ public class AndroidWSServer implements IAndroidWSServer {
 
     @OnClose
     public void onClose(Session session, @PathParam("udId") String udId) {
-        // udId 从 @PathParam 直接取（而不是 session.getUserProperties()），
-        // 因为 onOpen 在锁获取成功后仍有 early-return 分支（如设备未连接）——
-        // 那些分支跑不到把 udId 写进 session properties 那一步，之前这里读出来是 null，
-        // 导致 DevicesLockMap.unlockAndRemoveByUdId 直接在 Assert.hasText 上抛异常，
-        // 锁永远不释放（该设备之后每次都要等 30s tryAcquire 超时）。见 onOpen 里的
-        // lockSuccess 判断到 session.getUserProperties().put("udId", ...) 之间那段。
+        // udId 从 @PathParam 直接取（而不是 session.getUserProperties()），因为 onOpen
+        // 在锁获取成功后仍有 early-return 分支（如设备未连接）——那些分支跑不到把 udId
+        // 写进 session properties 那一步，之前这里读出来是 null，导致
+        // DevicesLockMap.unlockAndRemoveByUdId 直接在 Assert.hasText 上抛异常，锁永远
+        // 不释放（该设备之后每次都要等 30s tryAcquire 超时）。
+        //
+        // ⚠️ 只有 onOpen 真的拿到过锁（lockAcquired=true）才能在这里释放/移除锁——
+        // 如果这次 onOpen 是因为 lockSuccess=false（设备正被别的活跃会话占用）提前
+        // return 的，这里绝不能调用 unlockAndRemoveByUdId，否则会把别的会话正持有的锁
+        // 强行释放掉，破坏它的互斥保证。
+        boolean lockAcquired = Boolean.TRUE.equals(session.getUserProperties().get("lockAcquired"));
         try {
-            exit(session);
+            exit(session, udId, lockAcquired);
         } finally {
-            DevicesLockMap.unlockAndRemoveByUdId(udId);
-            log.info("android unlock udId：{}", udId);
+            if (lockAcquired) {
+                DevicesLockMap.unlockAndRemoveByUdId(udId);
+                log.info("android unlock udId：{}", udId);
+            }
         }
     }
 
@@ -438,16 +449,26 @@ public class AndroidWSServer implements IAndroidWSServer {
         }
     }
 
-    private void exit(Session session) {
+    private void exit(Session session, String udId, boolean lockAcquired) {
+        if (!lockAcquired) {
+            // 这次 onOpen 从没拿到过这个 udId 的锁（鉴权失败，或设备正被别的活跃会话
+            // 占用）——DevicesLockMap / AndroidDeviceLocalStatus 里的状态都不属于这次
+            // 连接，绝不能动，直接什么都不做。
+            return;
+        }
         synchronized (session) {
             ScheduledFuture<?> future = (ScheduledFuture<?>) session.getUserProperties().get("schedule");
             if (future == null) {
-                // onOpen 在设置 schedule 之前就 early-return 了（鉴权/拿锁/设备检测未过），
-                // 后面这些字段（udId、iDevice、driver 等）都还没初始化，没什么需要清理的。
+                // 拿到了锁，但 onOpen 在设置 schedule 之前就 early-return 了（设备检测
+                // 未过，或 apk 安装失败），udId/iDevice/driver 等都还没初始化——但
+                // startDebug(udId) 在拿锁成功后就立刻把设备状态推成 DEBUGGING 了，这里
+                // 必须补一次 finish 把状态改回 ONLINE，否则设备会卡在 DEBUGGING 直到
+                // 下次真实的 adb 断线重连事件（可能永远不发生）。
+                AndroidDeviceLocalStatus.finish(udId);
                 return;
             }
             future.cancel(true);
-            AndroidDeviceLocalStatus.finish(session.getUserProperties().get("udId") + "");
+            AndroidDeviceLocalStatus.finish(udId);
             IDevice iDevice = udIdMap.get(session);
             try {
                 AndroidStepHandler androidStepHandler = HandlerMap.getAndroidMap().get(iDevice.getSerialNumber());

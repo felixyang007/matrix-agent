@@ -89,6 +89,9 @@ public class IOSWSServer implements IIOSWSServer {
             return;
         }
         log.info("ios lock udId：{}", udId);
+        // 标记这次 onOpen 真的拿到了这个 udId 的锁，onClose/exit 靠它判断能不能碰
+        // DevicesLockMap / IOSDeviceLocalStatus 的共享状态（同 AndroidWSServer）。
+        session.getUserProperties().put("lockAcquired", Boolean.TRUE);
         IOSDeviceLocalStatus.startDebug(udId);
 
         if (!SimctlTool.isIOSDevice(udId)) {
@@ -121,7 +124,7 @@ public class IOSWSServer implements IIOSWSServer {
                 JSONObject errMsg = new JSONObject();
                 errMsg.put("msg", "error");
                 BytesTool.sendText(session, errMsg.toJSONString());
-                exit(session);
+                exit(session, udId, true); // 走到这里必然已经拿到锁（见 onOpen 前半段）
             }
         }, BytesTool.remoteTimeout));
 
@@ -175,11 +178,17 @@ public class IOSWSServer implements IIOSWSServer {
         // session.getUserProperties().put("udId", ...) 那一步——onOpen 在拿锁成功后
         // 仍有 early-return 分支（isIOSDevice 检测失败等），那些分支下这里原来读出来是 null，
         // 导致 unlockAndRemoveByUdId 在 Assert.hasText 上抛异常，锁永久不释放。
+        //
+        // ⚠️ 只有 onOpen 真的拿到过锁（lockAcquired=true）才能在这里释放/移除锁——
+        // lockSuccess=false 时锁属于别的活跃会话，误释放会破坏它的互斥保证。
+        boolean lockAcquired = Boolean.TRUE.equals(session.getUserProperties().get("lockAcquired"));
         try {
-            exit(session);
+            exit(session, udId, lockAcquired);
         } finally {
-            DevicesLockMap.unlockAndRemoveByUdId(udId);
-            log.info("ios unlock udId：{}", udId);
+            if (lockAcquired) {
+                DevicesLockMap.unlockAndRemoveByUdId(udId);
+                log.info("ios unlock udId：{}", udId);
+            }
         }
     }
 
@@ -500,15 +509,23 @@ public class IOSWSServer implements IIOSWSServer {
         });
     }
 
-    private void exit(Session session) {
+    private void exit(Session session, String udId, boolean lockAcquired) {
+        if (!lockAcquired) {
+            // 这次 onOpen 从没拿到过这个 udId 的锁（鉴权失败，或设备正被别的活跃会话
+            // 占用）——共享状态不属于这次连接，绝不能动，直接什么都不做。
+            return;
+        }
         synchronized (session) {
             ScheduledFuture<?> future = (ScheduledFuture<?>) session.getUserProperties().get("schedule");
             if (future == null) {
-                // onOpen 在设置 schedule 之前就 early-return 了，后面字段都还没初始化，无需清理。
+                // 拿到了锁，但 onOpen 在设置 schedule 之前就 early-return 了（isIOSDevice
+                // 检测未过）——但 startDebug(udId) 在拿锁成功后就立刻把设备状态推成了
+                // DEBUGGING，这里必须补一次 finish 把状态改回 ONLINE，否则设备会卡在
+                // DEBUGGING 直到下次真实的重连事件（可能永远不发生）。
+                IOSDeviceLocalStatus.finish(udId);
                 return;
             }
             future.cancel(true);
-            String udId = udIdMap.get(session);
             screenMap.remove(udId);
             SibTool.stopOrientationWatcher(udId);
             try {
@@ -525,7 +542,7 @@ public class IOSWSServer implements IIOSWSServer {
             SibTool.stopPerfmon(udId);
             SibTool.stopShare(udId);
             SGMTool.stopProxy(udId);
-            IOSDeviceLocalStatus.finish(session.getUserProperties().get("udId") + "");
+            IOSDeviceLocalStatus.finish(udId);
             WebSocketSessionMap.removeSession(session);
             removeUdIdMapAndSet(session);
             try {
