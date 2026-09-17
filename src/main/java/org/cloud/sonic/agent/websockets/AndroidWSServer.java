@@ -156,15 +156,12 @@ public class AndroidWSServer implements IAndroidWSServer {
         // 如果这次 onOpen 是因为 lockSuccess=false（设备正被别的活跃会话占用）提前
         // return 的，这里绝不能调用 unlockAndRemoveByUdId，否则会把别的会话正持有的锁
         // 强行释放掉，破坏它的互斥保证。
+        // issue #4 补充：解锁本身也已经挪进 exit() 内部（幂等），不再依赖这里的 finally
+        // 一定会跑到——实测存在“exit() 已经打了 quit. 日志，但走不到这个 finally”的情况
+        // （比如底层连接已经因为 Broken pipe 之类的错误被容器提前处理掉）。这里仍然保留
+        // exit() 的正常调用路径，解锁交给 exit() 自己保证。
         boolean lockAcquired = Boolean.TRUE.equals(session.getUserProperties().get("lockAcquired"));
-        try {
-            exit(session, udId, lockAcquired);
-        } finally {
-            if (lockAcquired) {
-                DevicesLockMap.unlockAndRemoveByUdId(udId);
-                log.info("android unlock udId：{}", udId);
-            }
-        }
+        exit(session, udId, lockAcquired);
     }
 
     @OnError
@@ -456,50 +453,58 @@ public class AndroidWSServer implements IAndroidWSServer {
             // 连接，绝不能动，直接什么都不做。
             return;
         }
-        synchronized (session) {
-            ScheduledFuture<?> future = (ScheduledFuture<?>) session.getUserProperties().get("schedule");
-            if (future == null) {
-                // 拿到了锁，但 onOpen 在设置 schedule 之前就 early-return 了（设备检测
-                // 未过，或 apk 安装失败），udId/iDevice/driver 等都还没初始化——但
-                // startDebug(udId) 在拿锁成功后就立刻把设备状态推成 DEBUGGING 了，这里
-                // 必须补一次 finish 把状态改回 ONLINE，否则设备会卡在 DEBUGGING 直到
-                // 下次真实的 adb 断线重连事件（可能永远不发生）。
-                AndroidDeviceLocalStatus.finish(udId);
-                return;
-            }
-            future.cancel(true);
-            AndroidDeviceLocalStatus.finish(udId);
-            IDevice iDevice = udIdMap.get(session);
-            try {
-                AndroidStepHandler androidStepHandler = HandlerMap.getAndroidMap().get(iDevice.getSerialNumber());
-                if (androidStepHandler != null) {
-                    androidStepHandler.closeAndroidDriver();
+        try {
+            synchronized (session) {
+                ScheduledFuture<?> future = (ScheduledFuture<?>) session.getUserProperties().get("schedule");
+                if (future == null) {
+                    // 拿到了锁，但 onOpen 在设置 schedule 之前就 early-return 了（设备检测
+                    // 未过，或 apk 安装失败），udId/iDevice/driver 等都还没初始化——但
+                    // startDebug(udId) 在拿锁成功后就立刻把设备状态推成 DEBUGGING 了，这里
+                    // 必须补一次 finish 把状态改回 ONLINE，否则设备会卡在 DEBUGGING 直到
+                    // 下次真实的 adb 断线重连事件（可能永远不发生）。
+                    AndroidDeviceLocalStatus.finish(udId);
+                    return;
                 }
-            } catch (Exception e) {
-                log.info("close driver failed.");
-            } finally {
-                HandlerMap.getAndroidMap().remove(iDevice.getSerialNumber());
+                future.cancel(true);
+                AndroidDeviceLocalStatus.finish(udId);
+                IDevice iDevice = udIdMap.get(session);
+                if (iDevice != null) {
+                    try {
+                        AndroidStepHandler androidStepHandler = HandlerMap.getAndroidMap().get(iDevice.getSerialNumber());
+                        if (androidStepHandler != null) {
+                            androidStepHandler.closeAndroidDriver();
+                        }
+                    } catch (Exception e) {
+                        log.info("close driver failed.");
+                    } finally {
+                        HandlerMap.getAndroidMap().remove(iDevice.getSerialNumber());
+                    }
+                    AndroidDeviceBridgeTool.clearProxy(iDevice);
+                    AndroidDeviceBridgeTool.clearWebView(iDevice);
+                    AndroidSupplyTool.stopShare(iDevice.getSerialNumber());
+                    AndroidSupplyTool.stopPerfmon(iDevice.getSerialNumber());
+                    SGMTool.stopProxy(iDevice.getSerialNumber());
+                    AndroidAPKMap.getMap().remove(iDevice.getSerialNumber());
+                    AndroidTouchHandler.stopTouch(iDevice);
+                }
+                removeUdIdMapAndSet(session);
+                WebSocketSessionMap.removeSession(session);
+                try {
+                    session.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+                log.info("{} : quit.", session.getUserProperties().get("id").toString());
+                if (iDevice != null && AndroidDeviceBridgeTool.getOrientation(iDevice) != 0) {
+                    AndroidDeviceBridgeTool.pressKey(iDevice, AndroidKey.HOME);
+                }
             }
-            if (iDevice != null) {
-                AndroidDeviceBridgeTool.clearProxy(iDevice);
-                AndroidDeviceBridgeTool.clearWebView(iDevice);
-                AndroidSupplyTool.stopShare(iDevice.getSerialNumber());
-                AndroidSupplyTool.stopPerfmon(iDevice.getSerialNumber());
-                SGMTool.stopProxy(iDevice.getSerialNumber());
-                AndroidAPKMap.getMap().remove(iDevice.getSerialNumber());
-                AndroidTouchHandler.stopTouch(iDevice);
-            }
-            removeUdIdMapAndSet(session);
-            WebSocketSessionMap.removeSession(session);
-            try {
-                session.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            log.info("{} : quit.", session.getUserProperties().get("id").toString());
-            if (AndroidDeviceBridgeTool.getOrientation(iDevice) != 0) {
-                AndroidDeviceBridgeTool.pressKey(iDevice, AndroidKey.HOME);
-            }
+        } finally {
+            // issue #4 补充：解锁收口在这里、用 try/finally 保证一定执行，不再依赖调用方
+            // （onClose 的 finally，或超时踢人的 schedule 回调——后者其实从来没配过解锁）
+            // 各自记得释放。unlockAndRemoveByUdId 本身幂等，被多个调用路径各调一次也安全。
+            DevicesLockMap.unlockAndRemoveByUdId(udId);
+            log.info("android unlock udId：{}", udId);
         }
     }
 }

@@ -122,9 +122,17 @@ public class ScrcpyLocalThread extends Thread {
 
                         @Override
                         public boolean isCancelled() {
-                            return false;
+                            // issue #4 同款问题的第三个变种：硬编码 false 时 ddmlib 永远不知道
+                            // 要停，设备端这个 scrcpy server 进程会话结束后继续跑，连带下游
+                            // ScrcpyInputSocketThread/ScrcpyOutputSocketThread 的阻塞 socket
+                            // 读也永远不返回（实测 jstack 里两个线程存活 9 分钟以上）。
+                            // AndroidScreenWSServer.exit() 已经在调用
+                            // ScreenMap.getMap().get(session).interrupt()（即中断这个
+                            // ScrcpyLocalThread 自身），这里直接读那个中断标记即可接上，
+                            // 不用再另开一个标记字段。
+                            return Thread.currentThread().isInterrupted();
                         }
-                    }, 0, TimeUnit.MILLISECONDS);
+                    }, 60L, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.info("{} scrcpy service stopped.", iDevice.getSerialNumber());
             log.error(e.getMessage());

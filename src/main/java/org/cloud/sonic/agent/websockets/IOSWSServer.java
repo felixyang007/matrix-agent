@@ -181,15 +181,11 @@ public class IOSWSServer implements IIOSWSServer {
         //
         // ⚠️ 只有 onOpen 真的拿到过锁（lockAcquired=true）才能在这里释放/移除锁——
         // lockSuccess=false 时锁属于别的活跃会话，误释放会破坏它的互斥保证。
+        // issue #4 补充（本来是 Android 侧报的，同款结构在这里一样存在）：解锁已经挪进
+        // exit() 内部并用 try/finally 保证一定执行，不再依赖这里的 finally 一定跑到——
+        // 超时踢人的 schedule 回调直接调 exit() 时从没配过解锁，是真实的漏锁路径。
         boolean lockAcquired = Boolean.TRUE.equals(session.getUserProperties().get("lockAcquired"));
-        try {
-            exit(session, udId, lockAcquired);
-        } finally {
-            if (lockAcquired) {
-                DevicesLockMap.unlockAndRemoveByUdId(udId);
-                log.info("ios unlock udId：{}", udId);
-            }
-        }
+        exit(session, udId, lockAcquired);
     }
 
     @OnError
@@ -515,42 +511,49 @@ public class IOSWSServer implements IIOSWSServer {
             // 占用）——共享状态不属于这次连接，绝不能动，直接什么都不做。
             return;
         }
-        synchronized (session) {
-            ScheduledFuture<?> future = (ScheduledFuture<?>) session.getUserProperties().get("schedule");
-            if (future == null) {
-                // 拿到了锁，但 onOpen 在设置 schedule 之前就 early-return 了（isIOSDevice
-                // 检测未过）——但 startDebug(udId) 在拿锁成功后就立刻把设备状态推成了
-                // DEBUGGING，这里必须补一次 finish 把状态改回 ONLINE，否则设备会卡在
-                // DEBUGGING 直到下次真实的重连事件（可能永远不发生）。
-                IOSDeviceLocalStatus.finish(udId);
-                return;
-            }
-            future.cancel(true);
-            screenMap.remove(udId);
-            SibTool.stopOrientationWatcher(udId);
-            try {
-                IOSStepHandler iosStepHandler = HandlerMap.getIOSMap().get(udId);
-                if (iosStepHandler != null) {
-                    iosStepHandler.closeIOSDriver();
+        try {
+            synchronized (session) {
+                ScheduledFuture<?> future = (ScheduledFuture<?>) session.getUserProperties().get("schedule");
+                if (future == null) {
+                    // 拿到了锁，但 onOpen 在设置 schedule 之前就 early-return 了（isIOSDevice
+                    // 检测未过）——但 startDebug(udId) 在拿锁成功后就立刻把设备状态推成了
+                    // DEBUGGING，这里必须补一次 finish 把状态改回 ONLINE，否则设备会卡在
+                    // DEBUGGING 直到下次真实的重连事件（可能永远不发生）。
+                    IOSDeviceLocalStatus.finish(udId);
+                    return;
                 }
-            } catch (Exception e) {
-                log.info("close driver failed.");
-            } finally {
-                HandlerMap.getIOSMap().remove(udId);
+                future.cancel(true);
+                screenMap.remove(udId);
+                SibTool.stopOrientationWatcher(udId);
+                try {
+                    IOSStepHandler iosStepHandler = HandlerMap.getIOSMap().get(udId);
+                    if (iosStepHandler != null) {
+                        iosStepHandler.closeIOSDriver();
+                    }
+                } catch (Exception e) {
+                    log.info("close driver failed.");
+                } finally {
+                    HandlerMap.getIOSMap().remove(udId);
+                }
+                SibTool.stopWebInspector(udId);
+                SibTool.stopPerfmon(udId);
+                SibTool.stopShare(udId);
+                SGMTool.stopProxy(udId);
+                IOSDeviceLocalStatus.finish(udId);
+                WebSocketSessionMap.removeSession(session);
+                removeUdIdMapAndSet(session);
+                try {
+                    session.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+                log.info("{} : quit.", session.getUserProperties().get("id").toString());
             }
-            SibTool.stopWebInspector(udId);
-            SibTool.stopPerfmon(udId);
-            SibTool.stopShare(udId);
-            SGMTool.stopProxy(udId);
-            IOSDeviceLocalStatus.finish(udId);
-            WebSocketSessionMap.removeSession(session);
-            removeUdIdMapAndSet(session);
-            try {
-                session.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            log.info("{} : quit.", session.getUserProperties().get("id").toString());
+        } finally {
+            // 同 AndroidWSServer（issue #4 补充）：解锁收口在这里、try/finally 保证一定
+            // 执行，不再依赖调用方各自记得释放；unlockAndRemoveByUdId 幂等，安全。
+            DevicesLockMap.unlockAndRemoveByUdId(udId);
+            log.info("ios unlock udId：{}", udId);
         }
     }
 }

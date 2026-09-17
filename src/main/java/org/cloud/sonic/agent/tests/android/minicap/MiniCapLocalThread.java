@@ -160,9 +160,11 @@ public class MiniCapLocalThread extends Thread {
 
                 @Override
                 public boolean isCancelled() {
-                    return false;
+                    // 同 ScrcpyLocalThread（issue #4 同款问题）：接上 AndroidScreenWSServer.exit()
+                    // 已经在调的 ScreenMap.getMap().get(session).interrupt()。
+                    return Thread.currentThread().isInterrupted();
                 }
-            }, 0, TimeUnit.MILLISECONDS);
+            }, 60L, TimeUnit.SECONDS);
         } catch (Exception e) {
             isSuc.set(false);
             log.info("{} minicap stopped."
