@@ -44,6 +44,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * @author ZhouYiXun
@@ -153,8 +154,9 @@ public class AndroidTerminalWSServer implements IAndroidWSServer {
                 break;
             }
             case "stopCmd":
+                cancelCmd(session);
                 Future<?> ter = terminalMap.get(session);
-                if (!ter.isDone() || !ter.isCancelled()) {
+                if (ter != null && !ter.isDone()) {
                     try {
                         ter.cancel(true);
                     } catch (Exception e) {
@@ -171,6 +173,11 @@ public class AndroidTerminalWSServer implements IAndroidWSServer {
                     BytesTool.sendText(session, done.toJSONString());
                     return;
                 }
+                // issue #4：isCancelled() 之前硬编码 false，ddmlib 永远不知道要中止、
+                // 也不会去关设备端进程。这里用一个真实标记驱动它——每次开新命令重置一个，
+                // cancelCmd()（stopCmd / 换新命令 / exit()）负责置位。
+                AtomicBoolean cmdCancelled = new AtomicBoolean(false);
+                session.getUserProperties().put("cmdCancelled", cmdCancelled);
                 ter = AndroidDeviceThreadPool.cachedThreadPool.submit(() -> {
                     try {
                         udIdMap.get(session).executeShellCommand(msg.getString("detail"), new IShellOutputReceiver() {
@@ -189,9 +196,9 @@ public class AndroidTerminalWSServer implements IAndroidWSServer {
 
                             @Override
                             public boolean isCancelled() {
-                                return false;
+                                return cmdCancelled.get() || !session.isOpen();
                             }
-                        }, 0, TimeUnit.MILLISECONDS);
+                        }, 60L, TimeUnit.SECONDS);
                     } catch (Throwable e) {
                         return;
                     }
@@ -202,8 +209,9 @@ public class AndroidTerminalWSServer implements IAndroidWSServer {
                 terminalMap.put(session, ter);
                 break;
             case "stopLogcat": {
+                cancelLogcat(session);
                 Future<?> logcat = logcatMap.get(session);
-                if (!logcat.isDone() || !logcat.isCancelled()) {
+                if (logcat != null && !logcat.isDone()) {
                     try {
                         logcat.cancel(true);
                     } catch (Exception e) {
@@ -213,14 +221,21 @@ public class AndroidTerminalWSServer implements IAndroidWSServer {
                 break;
             }
             case "logcat": {
+                cancelLogcat(session);
                 Future<?> logcat = logcatMap.get(session);
-                if (!logcat.isDone() || !logcat.isCancelled()) {
+                if (logcat != null && !logcat.isDone()) {
                     try {
                         logcat.cancel(true);
                     } catch (Exception e) {
                         log.error(e.getMessage());
                     }
                 }
+                // issue #4 缺陷 1：isCancelled() 之前硬编码 false——ddmlib 不知道要停，
+                // 设备端的 logcat 进程在会话结束后继续跑，堆在 adb server 单线程事件循环
+                // 里，最终堵死全部 adb 客户端（实测最久一个跑了 7 小时 34 分）。这里用真实
+                // 标记驱动它，cancelLogcat()（stopLogcat / 换新 logcat / exit()）负责置位。
+                AtomicBoolean logcatCancelled = new AtomicBoolean(false);
+                session.getUserProperties().put("logcatCancelled", logcatCancelled);
                 logcat = AndroidDeviceThreadPool.cachedThreadPool.submit(() -> {
                     try {
                         udIdMap.get(session).executeShellCommand("logcat *:"
@@ -242,9 +257,9 @@ public class AndroidTerminalWSServer implements IAndroidWSServer {
 
                             @Override
                             public boolean isCancelled() {
-                                return false;
+                                return logcatCancelled.get() || !session.isOpen();
                             }
-                        }, 0, TimeUnit.MILLISECONDS);
+                        }, 60L, TimeUnit.SECONDS);
                     } catch (Throwable e) {
                         return;
                     }
@@ -268,6 +283,26 @@ public class AndroidTerminalWSServer implements IAndroidWSServer {
         BytesTool.sendText(session, errMsg.toJSONString());
     }
 
+    /**
+     * 置位 "command" 分支的取消标记，让 ddmlib 里的 isCancelled() 真的能读到 true。
+     */
+    private void cancelCmd(Session session) {
+        Object flag = session.getUserProperties().get("cmdCancelled");
+        if (flag instanceof AtomicBoolean) {
+            ((AtomicBoolean) flag).set(true);
+        }
+    }
+
+    /**
+     * 置位 "logcat" 分支的取消标记，见 issue #4。
+     */
+    private void cancelLogcat(Session session) {
+        Object flag = session.getUserProperties().get("logcatCancelled");
+        if (flag instanceof AtomicBoolean) {
+            ((AtomicBoolean) flag).set(true);
+        }
+    }
+
     private void exit(Session session) {
         synchronized (session) {
             // 见 issue #3：onOpen 在 apk 安装等待超时时会提前调用 exit()，此时 "schedule"
@@ -279,6 +314,10 @@ public class AndroidTerminalWSServer implements IAndroidWSServer {
             }
             WebSocketSessionMap.removeSession(session);
             removeUdIdMapAndSet(session);
+            // 见 issue #4：这是"打开终端/日志后直接关页面"最常触发的清理路径——必须先置位
+            // 取消标记，ddmlib 才会真的停止读流、关掉设备端进程，否则只是 Future.cancel(true)
+            // 中断了 Java 线程，adb 那边的 logcat/shell 进程照样孤儿般跑下去。
+            cancelCmd(session);
             Future<?> cmd = terminalMap.remove(session);
             if (cmd != null && !cmd.isDone()) {
                 try {
@@ -288,6 +327,7 @@ public class AndroidTerminalWSServer implements IAndroidWSServer {
                 }
             }
             stopService(session);
+            cancelLogcat(session);
             Future<?> logcat = logcatMap.remove(session);
             if (logcat != null && !logcat.isDone()) {
                 try {

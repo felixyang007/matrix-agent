@@ -252,11 +252,14 @@ public class AndroidDeviceBridgeTool implements ApplicationListener<ContextRefre
     public static String executeCommand(IDevice iDevice, String command) {
         CollectingOutputReceiver output = new CollectingOutputReceiver();
         try {
-            iDevice.executeShellCommand(command, output, 0, TimeUnit.MILLISECONDS);
+            // issue #4：0 在 ddmlib 里是"永不超时"，一旦 adb server 被别的泄漏卡住，
+            // 这里就会无限期挂住（实测卡过 75 秒），进而拖死上层 onOpen。改成有界超时，
+            // 这里的命令(dumpsys/input/settings 等)正常都是毫秒级返回，30s 足够宽松。
+            iDevice.executeShellCommand(command, output, 30L, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.info("Send shell command {} to device {} failed."
                     , command, iDevice.getSerialNumber());
-            log.error(e.getMessage());
+            log.error(e.getMessage(), e);
         }
         return output.getOutput();
     }
@@ -344,28 +347,49 @@ public class AndroidDeviceBridgeTool implements ApplicationListener<ContextRefre
      * @date 2021/8/16 19:53
      */
     public static void removeForward(IDevice iDevice, int port, String serviceName) {
-        try {
-            log.info("cancel {} device {} port forward to {}", iDevice.getSerialNumber(), serviceName, port);
-            iDevice.removeForward(port);
-            String name = String.format("process-%s-forward-%s", iDevice.getSerialNumber(), serviceName);
-            if (forwardPortMap.get(name) != null) {
-                forwardPortMap.remove(name);
-            }
-        } catch (Exception e) {
-            log.error(e.getMessage());
-        }
+        log.info("cancel {} device {} port forward to {}", iDevice.getSerialNumber(), serviceName, port);
+        removeForwardInternal(iDevice, port, String.format("process-%s-forward-%s", iDevice.getSerialNumber(), serviceName));
     }
 
     public static void removeForward(IDevice iDevice, int port, int target) {
+        log.info("cancel {} device {} forward to {}", iDevice.getSerialNumber(), target, port);
+        removeForwardInternal(iDevice, port, String.format("process-%s-forward-%d", iDevice.getSerialNumber(), target));
+    }
+
+    /**
+     * @param iDevice
+     * @param port
+     * @param mapKey forwardPortMap 里对应的记录 key
+     * @des issue #4：ddmlib 的 removeForward 失败时异常被吞、无重试无兜底，导致转发和
+     * forwardPortMap 记录一起残留。这里重试一次；仍失败就降级直接跑 adb 命令强制移除
+     * （不依赖 ddmlib 内部状态）；无论最终成不成功，forwardPortMap 记录都必须清掉——
+     * 陈旧记录会让后续 forward() 基于错误状态做决策，比端口转发泄漏本身更麻烦。
+     */
+    private static void removeForwardInternal(IDevice iDevice, int port, String mapKey) {
         try {
-            log.info("cancel {} device {} forward to {}", iDevice.getSerialNumber(), target, port);
-            iDevice.removeForward(port);
-            String name = String.format("process-%s-forward-%d", iDevice.getSerialNumber(), target);
-            if (forwardPortMap.get(name) != null) {
-                forwardPortMap.remove(name);
+            try {
+                iDevice.removeForward(port);
+            } catch (Exception first) {
+                log.error("removeForward first attempt failed for {} port {}, retrying once", iDevice.getSerialNumber(), port, first);
+                try {
+                    iDevice.removeForward(port);
+                } catch (Exception second) {
+                    log.error("removeForward retry also failed for {} port {}, falling back to adb command", iDevice.getSerialNumber(), port, second);
+                    String system = System.getProperty("os.name").toLowerCase();
+                    String command = String.format("%s -s %s forward --remove tcp:%d", getADBPathFromSystemEnv(), iDevice.getSerialNumber(), port);
+                    try {
+                        if (system.contains("win")) {
+                            Runtime.getRuntime().exec(new String[]{"cmd", "/c", command});
+                        } else {
+                            Runtime.getRuntime().exec(new String[]{"sh", "-c", command});
+                        }
+                    } catch (Exception fallback) {
+                        log.error("fallback adb forward --remove also failed for {} port {}", iDevice.getSerialNumber(), port, fallback);
+                    }
+                }
             }
-        } catch (Exception e) {
-            log.error(e.getMessage());
+        } finally {
+            forwardPortMap.remove(mapKey);
         }
     }
 
