@@ -87,6 +87,7 @@ public class AndroidScreenWSServer implements IAndroidWSServer {
         if (!isInstall) {
             log.info("Waiting for apk install timeout!");
             exit(session);
+            return; // 同 issue #3：漏掉这个 return 会继续跑到 schedule 还没设置时就退出。
         }
 
         session.getUserProperties().put("schedule",ScheduleTool.schedule(() -> {
@@ -184,24 +185,39 @@ public class AndroidScreenWSServer implements IAndroidWSServer {
 
     private void exit(Session session) {
         synchronized (session) {
+            // 同 AndroidTerminalWSServer（issue #3）：onOpen 在 apk 安装等待超时时会提前
+            // exit()，此时 "schedule" 还没写入；onClose 又会再调用一次。这里全部改成
+            // null-safe，"udId" 在这个提前 return 分支之前已经写入（见 onOpen），所以
+            // 这里读它本身没问题，只有 future 和 id 需要 guard。
             ScheduledFuture<?> future = (ScheduledFuture<?>) session.getUserProperties().get("schedule");
-            future.cancel(true);
-            String udId = session.getUserProperties().get("udId").toString();
-            androidMonitorHandler.stopMonitor(udIdMap.get(session));
+            if (future != null) {
+                future.cancel(true);
+            }
+            Object udIdProp = session.getUserProperties().get("udId");
+            String udId = udIdProp != null ? udIdProp.toString() : null;
+            // stopMonitor 内部直接解引用，不能传 null（exit() 被二次调用时 udIdMap 已被
+            // 第一次调用 remove 掉，这里会拿到 null）。
+            IDevice targetDevice = udIdMap.get(session);
+            if (targetDevice != null) {
+                androidMonitorHandler.stopMonitor(targetDevice);
+            }
             WebSocketSessionMap.removeSession(session);
             removeUdIdMapAndSet(session);
-            AndroidDeviceManagerMap.getRotationMap().remove(udId);
+            if (udId != null) {
+                AndroidDeviceManagerMap.getRotationMap().remove(udId);
+                typeMap.remove(udId);
+                picMap.remove(udId);
+            }
             if (ScreenMap.getMap().get(session) != null) {
                 ScreenMap.getMap().get(session).interrupt();
             }
-            typeMap.remove(udId);
-            picMap.remove(udId);
             try {
                 session.close();
             } catch (IOException e) {
                 e.printStackTrace();
             }
-            log.info("{} : quit.", session.getUserProperties().get("id").toString());
+            Object id = session.getUserProperties().get("id");
+            log.info("{} : quit.", id != null ? id.toString() : session.getId());
         }
     }
 }

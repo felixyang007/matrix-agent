@@ -105,8 +105,12 @@ public class IOSTerminalWSServer implements IIOSWSServer {
 
     private void exit(Session session) {
         synchronized (session) {
+            // 同 issue #3（AndroidTerminalWSServer）：onOpen 鉴权/设备检测失败时提前
+            // return，"schedule" 从没写入过；onClose 仍会调用这里，future 是 null。
             ScheduledFuture<?> future = (ScheduledFuture<?>) session.getUserProperties().get("schedule");
-            future.cancel(true);
+            if (future != null) {
+                future.cancel(true);
+            }
             if (udIdMap.get(session) != null) {
                 SibTool.stopSysLog(udIdMap.get(session));
             }
@@ -117,7 +121,8 @@ public class IOSTerminalWSServer implements IIOSWSServer {
             } catch (IOException e) {
                 e.printStackTrace();
             }
-            log.info("{} : quit.", session.getUserProperties().get("id").toString());
+            Object id = session.getUserProperties().get("id");
+            log.info("{} : quit.", id != null ? id.toString() : session.getId());
         }
     }
 }

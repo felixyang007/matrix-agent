@@ -106,6 +106,8 @@ public class AndroidTerminalWSServer implements IAndroidWSServer {
         if (!isInstall) {
             log.info("Waiting for apk install timeout!");
             exit(session);
+            return; // 见 issue #3：漏掉这个 return 会继续往下执行到 schedule 还没设置就
+                    // 被 exit() 提前清理掉的 startService，读到的 future 必然是 null。
         }
 
         session.getUserProperties().put("schedule", ScheduleTool.schedule(() -> {
@@ -268,12 +270,17 @@ public class AndroidTerminalWSServer implements IAndroidWSServer {
 
     private void exit(Session session) {
         synchronized (session) {
+            // 见 issue #3：onOpen 在 apk 安装等待超时时会提前调用 exit()，此时 "schedule"
+            // 及后面这些 map 项都还没建立；onClose 也会再调用一次 exit()。下面全部改成
+            // null-safe + 用 remove() 取值（天然幂等，第二次进来读到的都是 null，直接跳过）。
             ScheduledFuture<?> future = (ScheduledFuture<?>) session.getUserProperties().get("schedule");
-            future.cancel(true);
+            if (future != null) {
+                future.cancel(true);
+            }
             WebSocketSessionMap.removeSession(session);
             removeUdIdMapAndSet(session);
-            Future<?> cmd = terminalMap.get(session);
-            if (!cmd.isDone() || !cmd.isCancelled()) {
+            Future<?> cmd = terminalMap.remove(session);
+            if (cmd != null && !cmd.isDone()) {
                 try {
                     cmd.cancel(true);
                 } catch (Exception e) {
@@ -281,23 +288,22 @@ public class AndroidTerminalWSServer implements IAndroidWSServer {
                 }
             }
             stopService(session);
-            terminalMap.remove(session);
-            Future<?> logcat = logcatMap.get(session);
-            if (!logcat.isDone() || !logcat.isCancelled()) {
+            Future<?> logcat = logcatMap.remove(session);
+            if (logcat != null && !logcat.isDone()) {
                 try {
                     logcat.cancel(true);
                 } catch (Exception e) {
                     log.error(e.getMessage());
                 }
             }
-            logcatMap.remove(session);
             udIdMap.remove(session);
             try {
                 session.close();
             } catch (IOException e) {
                 e.printStackTrace();
             }
-            log.info("{} : quit.", session.getUserProperties().get("id").toString());
+            Object id = session.getUserProperties().get("id");
+            log.info("{} : quit.", id != null ? id.toString() : session.getId());
         }
     }
 

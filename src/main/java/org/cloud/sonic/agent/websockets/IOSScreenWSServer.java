@@ -159,8 +159,12 @@ public class IOSScreenWSServer implements IIOSWSServer {
 
     private void exit(Session session) {
         synchronized (session) {
+            // 同 issue #3：onOpen 鉴权/设备检测失败、或等 MJPEG 端口 60s 超时（screenPort==0
+            // 直接 return，无清理）都会导致 onClose 调这里时 "schedule" 还没写入过。
             ScheduledFuture<?> future = (ScheduledFuture<?>) session.getUserProperties().get("schedule");
-            future.cancel(true);
+            if (future != null) {
+                future.cancel(true);
+            }
             WebSocketSessionMap.removeSession(session);
             removeUdIdMapAndSet(session);
             try {
@@ -168,7 +172,8 @@ public class IOSScreenWSServer implements IIOSWSServer {
             } catch (IOException e) {
                 e.printStackTrace();
             }
-            log.info("{} : quit.", session.getUserProperties().get("id").toString());
+            Object id = session.getUserProperties().get("id");
+            log.info("{} : quit.", id != null ? id.toString() : session.getId());
         }
     }
 }
