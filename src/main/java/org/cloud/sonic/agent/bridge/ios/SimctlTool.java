@@ -44,7 +44,9 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
 import java.net.Socket;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -110,6 +112,19 @@ public class SimctlTool implements ApplicationListener<ContextRefreshedEvent> {
     private static final Object wdaBuildLock = new Object();
     private static volatile boolean wdaBuilt = false;
     private static volatile String wdaXctestrunTemplate = null;
+
+    /**
+     * udId -> {wdaPort, mjpegPort} of the WDA currently running for it.
+     *
+     * <p>Simulator WDA costs ~100s to come up (xcodebuild build-for-testing +
+     * test-without-building), which is far longer than a user will wait on the
+     * device page. So a healthy runner is kept alive across debug sessions and
+     * reused; {@link #stopWda} is the single place that tears one down.</p>
+     */
+    private static final Map<String, int[]> wdaPorts = new ConcurrentHashMap<>();
+
+    /** udId -> the per-instance .xctestrun copy, deleted together with its runner. */
+    private static final Map<String, String> wdaXctestrunCopies = new ConcurrentHashMap<>();
 
     @PostConstruct
     public void setEnv() {
@@ -411,6 +426,9 @@ public class SimctlTool implements ApplicationListener<ContextRefreshedEvent> {
         DevicesBatteryMap.getTempMap().remove(udId);
         reportedUdids.remove(udId);
         simulatorUdids.remove(udId);
+        // The simulator is gone; its warm WDA can never be reused — reap it now
+        // instead of leaving the xcodebuild running until the agent exits.
+        stopWda(udId);
         logger.info("iOS Simulator: {} OFFLINE!", udId);
     }
 
@@ -418,13 +436,109 @@ public class SimctlTool implements ApplicationListener<ContextRefreshedEvent> {
     // WDA launch (simulator: no usbmuxd / iproxy)
     // ---------------------------------------------------------------------
 
-    /** Allocate a free port pair and start WDA. */
+    /** Allocate a free port pair and start WDA, or reuse the one already running. */
     public static int[] startWda(String udId) throws IOException, InterruptedException {
+        int[] running = reuseRunningWda(udId);
+        if (running != null) {
+            logger.info("Reusing running simulator WDA for {} on port {} (skipped ~100s startup).",
+                    udId, running[0]);
+            return running;
+        }
         Socket wda = PortTool.getBindSocket();
         Socket mjpeg = PortTool.getBindSocket();
         int wdaPort = PortTool.releaseAndGetPort(wda);
         int mjpegPort = PortTool.releaseAndGetPort(mjpeg);
         return startWda(udId, wdaPort, mjpegPort);
+    }
+
+    /**
+     * Whether {@code udId} already has a WDA that {@link #startWda(String)} would
+     * reuse — i.e. whether the caller is facing a ~100s cold start or not.
+     */
+    public static boolean hasRunningWda(String udId) {
+        int[] ports = wdaPorts.get(udId);
+        if (ports == null || freshInstancePerTask) {
+            return false;
+        }
+        List<Process> processList = IOSProcessMap.getMap().get(udId);
+        return processList != null
+                && processList.stream().anyMatch(p -> p != null && p.isAlive())
+                && isWdaResponding(ports[0]);
+    }
+
+    /**
+     * @return ports of a healthy WDA already running for {@code udId}, or null if
+     *         there is none (any unhealthy leftover is torn down first).
+     */
+    private static int[] reuseRunningWda(String udId) {
+        if (freshInstancePerTask) {
+            return null;
+        }
+        int[] ports = wdaPorts.get(udId);
+        if (ports == null) {
+            return null;
+        }
+        List<Process> processList = IOSProcessMap.getMap().get(udId);
+        boolean processAlive = processList != null && processList.stream()
+                .anyMatch(p -> p != null && p.isAlive());
+        if (processAlive && isWdaResponding(ports[0])) {
+            return ports;
+        }
+        logger.info("Simulator WDA for {} is no longer usable (processAlive={}), restarting.",
+                udId, processAlive);
+        stopWda(udId);
+        return null;
+    }
+
+    /** Probe {@code /status} — the cheapest proof that this WDA can still serve. */
+    private static boolean isWdaResponding(int wdaPort) {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) URI.create("http://127.0.0.1:" + wdaPort + "/status")
+                    .toURL().openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(2000);
+            conn.setReadTimeout(3000);
+            return conn.getResponseCode() == 200;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
+        }
+    }
+
+    /**
+     * Tear down the WDA runner of one simulator: the xcodebuild process and its
+     * children, the IOSProcessMap entry, the cached ports and the per-instance
+     * .xctestrun copy. Idempotent.
+     */
+    public static void stopWda(String udId) {
+        List<Process> processList = IOSProcessMap.getMap().remove(udId);
+        if (processList != null) {
+            for (Process p : processList) {
+                if (p == null) {
+                    continue;
+                }
+                // xcodebuild spawns the actual test runner as a child; destroying
+                // only the parent leaves the runner holding the WDA port.
+                p.descendants().forEach(ProcessHandle::destroy);
+                p.destroy();
+            }
+        }
+        wdaPorts.remove(udId);
+        String copy = wdaXctestrunCopies.remove(udId);
+        if (copy != null) {
+            try {
+                Files.deleteIfExists(new File(copy).toPath());
+            } catch (IOException e) {
+                logger.info("Failed to delete {}: {}", copy, e.getMessage());
+            }
+        }
+        if (processList != null) {
+            logger.info("Stopped simulator WDA for {}.", udId);
+        }
     }
 
     /**
@@ -439,15 +553,7 @@ public class SimctlTool implements ApplicationListener<ContextRefreshedEvent> {
      * verify against the matrix-ios-wda scheme.</p>
      */
     public static int[] startWda(String udId, int wdaPort, int mjpegPort) throws IOException, InterruptedException {
-        List<Process> processList = IOSProcessMap.getMap().get(udId);
-        if (processList != null) {
-            for (Process p : processList) {
-                if (p != null) {
-                    p.children().forEach(ProcessHandle::destroy);
-                    p.destroy();
-                }
-            }
-        }
+        stopWda(udId);
 
         // Build WDA once (shared derived-data), then inject the per-instance
         // ports into a copy of its .xctestrun and launch via test-without-building.
@@ -464,6 +570,7 @@ public class SimctlTool implements ApplicationListener<ContextRefreshedEvent> {
             logger.error("Failed to copy xctestrun for {}", udId, e);
             return new int[]{0, 0};
         }
+        wdaXctestrunCopies.put(udId, modified.getAbsolutePath());
         ProcessCommandTool.getProcessLocalCommand(String.format(
                 "plutil -replace WebDriverAgentRunner.EnvironmentVariables.USE_PORT -string %d '%s'",
                 wdaPort, modified.getAbsolutePath()));
@@ -516,19 +623,25 @@ public class SimctlTool implements ApplicationListener<ContextRefreshedEvent> {
         });
         wdaThread.start();
 
+        List<Process> newProcessList = new ArrayList<>();
+        newProcessList.add(wdaProcess);
+        // Register before the wait: on timeout stopWda() must be able to reap this
+        // process, otherwise the xcodebuild (and the test runner it spawned) keeps
+        // running untracked and holds its port forever.
+        IOSProcessMap.getMap().put(udId, newProcessList);
+
         int wait = 0;
         while (!isFinish.tryAcquire()) {
             Thread.sleep(500);
             wait++;
-            if (wait >= 120) {
+            if (wait >= 240) {
                 logger.info("{} simulator WebDriverAgent start timeout!", udId);
+                stopWda(udId);
                 return new int[]{0, 0};
             }
         }
 
-        List<Process> newProcessList = new ArrayList<>();
-        newProcessList.add(wdaProcess);
-        IOSProcessMap.getMap().put(udId, newProcessList);
+        wdaPorts.put(udId, new int[]{wdaPort, mjpegPort});
         return new int[]{wdaPort, mjpegPort};
     }
 

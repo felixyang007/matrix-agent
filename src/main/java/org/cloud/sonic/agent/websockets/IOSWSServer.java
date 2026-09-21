@@ -134,6 +134,15 @@ public class IOSWSServer implements IIOSWSServer {
                 SibTool.launch(udId, "com.apple.springboard");
             }
         }
+        if (SimctlTool.isSimulator(udId) && !SimctlTool.hasRunningWda(udId)) {
+            // 冷启动模拟器 WDA 要 xcodebuild build-for-testing + test-without-building，
+            // 实测约 100 秒。期间页面收不到任何东西，看起来和挂了一样，用户往往在
+            // WDA 就绪前几十秒就把页面关了（然后以为是坏的）。先明确告诉他要等。
+            JSONObject tip = new JSONObject();
+            tip.put("msg", "tip");
+            tip.put("text", "正在启动模拟器 WebDriverAgent，首次启动约需 1-2 分钟，请不要关闭页面…");
+            sendText(session, tip.toJSONString());
+        }
         int[] ports = SimctlTool.startWdaDispatch(udId);
         if (ports[0] != 0 && !SimctlTool.isSimulator(udId)) {
             SibTool.orientationWatcher(udId, session);
@@ -539,6 +548,12 @@ public class IOSWSServer implements IIOSWSServer {
                 SibTool.stopPerfmon(udId);
                 SibTool.stopShare(udId);
                 SGMTool.stopProxy(udId);
+                if (SimctlTool.isSimulator(udId) && SimctlTool.isFreshInstancePerTask()) {
+                    // 模拟器 WDA 起一次要 ~100s，默认（fresh-instance-per-task: false）
+                    // 留着热跑给下次会话复用，由 SimctlTool 统一记账，模拟器下线/agent
+                    // 退出时回收。只有显式要求每个任务全新实例时才在这里拆掉。
+                    SimctlTool.stopWda(udId);
+                }
                 IOSDeviceLocalStatus.finish(udId);
                 WebSocketSessionMap.removeSession(session);
                 removeUdIdMapAndSet(session);
