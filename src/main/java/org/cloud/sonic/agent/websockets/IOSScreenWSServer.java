@@ -70,9 +70,16 @@ public class IOSScreenWSServer implements IIOSWSServer {
         WebSocketSessionMap.addSession(session);
         saveUdIdMapAndSet(session, udId);
 
+        // screenMap 由 IOSWSServer 在 driver 起来之后才写入，所以这里等的其实是
+        // 整个 WDA 启动耗时。真机 WDA 已装好、秒级就绪，原来 120*500ms=60s 够用；
+        // 模拟器是 xcodebuild build-for-testing + test-without-building 冷启动，
+        // 实测 83 秒 —— 60 秒预算必然先到期，然后这里静默 return，页面永远黑屏，
+        // 等多久都没用（WDA 其实 20 多秒后就好了）。放宽到 240*500ms=240s 覆盖冷
+        // 启动；有热 WDA 可复用时是秒级，这个上限不会真的用满。
         int screenPort = 0;
         int wait = 0;
-        while (wait < 120) {
+        int maxWait = 240;
+        while (wait < maxWait) {
             Integer p = IOSWSServer.screenMap.get(udId);
             if (p != null) {
                 screenPort = p;
@@ -82,6 +89,13 @@ public class IOSScreenWSServer implements IIOSWSServer {
             wait++;
         }
         if (screenPort == 0) {
+            // 原来是裸 return，黑屏时日志里没有任何线索，只能靠对时间戳才能发现
+            // 是这里放弃的。
+            log.info("{} wait for mjpeg port timeout after {}s, screen will stay blank.",
+                    udId, maxWait / 2);
+            JSONObject errMsg = new JSONObject();
+            errMsg.put("msg", "error");
+            BytesTool.sendText(session, errMsg.toJSONString());
             return;
         }
         int finalScreenPort = screenPort;
