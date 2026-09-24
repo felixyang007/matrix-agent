@@ -1,9 +1,15 @@
 name: deploy to Dockerhub
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
+  # 上游 Sonic 残留，已停用自动触发（2026-09-24）。这个 job 用上游维护者的
+  # Dockerhub 账号（docker login -u zhouyixun）推到 sonicorg/* 命名空间，依赖也
+  # 全指向已归档的 SonicCloudOrg/* 仓库——既不是我们的命名空间，也没有对应的
+  # ACCESS_TOKEN secret，从 v2.7.10 起每次发版都稳定失败（挂在 setup-java@v2 的
+  # cache 400，就算修了也会接着挂在 docker login），只是给每个 release 带一个红叉。
+  #
+  # Matrix 的 agent 以 jar 形式分发、跑在各自的 Mac 上（见 release.yml 产出的 7 个
+  # 平台包），不消费这个镜像。保留文件备查，改为仅手动触发。
+  workflow_dispatch:
 
 jobs:
 
