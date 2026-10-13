@@ -86,8 +86,14 @@ public class SimctlTool implements ApplicationListener<ContextRefreshedEvent> {
     @Value("${modules.ios.wda-xcode-project-path:default}")
     private String getWdaXcodeProjectPath;
 
-    /** Base dir for per-instance DerivedData (avoid xcodebuild build lock). */
-    @Value("${modules.ios.simulator.derived-data-base:/tmp/matrix-simctl-deriveddata}")
+    /**
+     * Base dir for per-instance DerivedData (avoid xcodebuild build lock).
+     *
+     * <p>Defaults to ~/Library/Caches, not /tmp: macOS empties /tmp on every
+     * reboot, so the cached WDA build vanished and the first simulator session
+     * after each restart paid a full build-for-testing again.</p>
+     */
+    @Value("${modules.ios.simulator.derived-data-base:${user.home}/Library/Caches/matrix-agent/simctl-deriveddata}")
     private String getDerivedDataBase;
 
     /** Reset each simulator to factory state before every test task. */
@@ -96,7 +102,8 @@ public class SimctlTool implements ApplicationListener<ContextRefreshedEvent> {
 
     /** Static copies for use inside static helper methods (mirrors SibTool). */
     private static String wdaXcodeProjectPath = "default";
-    private static String derivedDataBase = "/tmp/matrix-simctl-deriveddata";
+    private static String derivedDataBase =
+            System.getProperty("user.home") + "/Library/Caches/matrix-agent/simctl-deriveddata";
     private static boolean freshInstancePerTask = false;
 
     /** Booted simulator udids, maintained by the poller; cheap {@link #isSimulator} check. */
@@ -286,9 +293,11 @@ public class SimctlTool implements ApplicationListener<ContextRefreshedEvent> {
                 return wdaXctestrunTemplate;
             }
             String dd = derivedDataBase + "-wda";
+            new File(dd).mkdirs();
+            // Quoted: the default now starts with user.home, which may contain spaces.
             String cmd = String.format(
-                    "xcodebuild build-for-testing -project %s -scheme WebDriverAgentRunner " +
-                            "-destination 'generic/platform=iOS Simulator' -derivedDataPath %s " +
+                    "xcodebuild build-for-testing -project '%s' -scheme WebDriverAgentRunner " +
+                            "-destination 'generic/platform=iOS Simulator' -derivedDataPath '%s' " +
                             "CODE_SIGNING_ALLOWED=NO GCC_TREAT_WARNINGS_AS_ERRORS=NO",
                     wdaXcodeProjectPath, dd);
             logger.info("Building WebDriverAgent for simulator (first run, cached): {}", cmd);
