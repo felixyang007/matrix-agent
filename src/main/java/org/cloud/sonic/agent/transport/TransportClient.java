@@ -125,9 +125,15 @@ public class TransportClient extends WebSocketClient {
                                 }
                             }
 
+                            OccupyMap.platformMap.put(udId, PlatformType.ANDROID);
                             OccupyMap.map.put(udId,
                                     ScheduleTool.schedule(() -> {
                                         log.info("time up!");
+                                        // 到点自己收尾：先摘掉占用记录，免得残留的旧记录之后被 release /
+                                        // stopDebug 当成"还在占用"再释放一次——那时锁可能已属于新会话。
+                                        // 不走 releaseOccupy()：它会 cancel(true) 掉正在执行的自己。
+                                        OccupyMap.map.remove(udId);
+                                        OccupyMap.platformMap.remove(udId);
                                         androidRelease(udId);
                                     }, BytesTool.remoteTimeout));
                         }
@@ -160,9 +166,15 @@ public class TransportClient extends WebSocketClient {
                                 }
                             }
 
+                            OccupyMap.platformMap.put(udId, PlatformType.IOS);
                             OccupyMap.map.put(udId,
                                     ScheduleTool.schedule(() -> {
                                         log.info("time up!");
+                                        // 到点自己收尾：先摘掉占用记录，免得残留的旧记录之后被 release /
+                                        // stopDebug 当成"还在占用"再释放一次——那时锁可能已属于新会话。
+                                        // 不走 releaseOccupy()：它会 cancel(true) 掉正在执行的自己。
+                                        OccupyMap.map.remove(udId);
+                                        OccupyMap.platformMap.remove(udId);
                                         iosRelease(udId);
                                     }, BytesTool.remoteTimeout));
                         }
@@ -177,16 +189,7 @@ public class TransportClient extends WebSocketClient {
                 case "release" -> {
                     String udId = jsonObject.getString("udId");
                     log.info("{} : release.", udId);
-                    ScheduledFuture<?> future = OccupyMap.map.get(udId);
-                    if (future != null) {
-                        future.cancel(true);
-                        OccupyMap.map.remove(udId);
-                        int platform = jsonObject.getInteger("platform");
-                        switch (platform) {
-                            case PlatformType.ANDROID -> androidRelease(udId);
-                            case PlatformType.IOS -> iosRelease(udId);
-                        }
-                    }
+                    releaseOccupy(udId, jsonObject.getInteger("platform"));
                 }
                 case "stopDebug" -> {
                     String udId = jsonObject.getString("udId");
@@ -225,6 +228,13 @@ public class TransportClient extends WebSocketClient {
                             }
                             log.info("{}-{} closed.", ss, udId);
                         }
+                    }
+                    // 「强制解除占用」原来只关上面这些浏览器远程控制的 WebSocket 会话；
+                    // 通过「远程占用」（occupy，REST API / 远程 ADB）占着的设备没有任何
+                    // WebSocket，上面的循环对它完全无效——设备会一直卡在 DEBUGGING，
+                    // 锁和远程 ADB 共享也不释放，直到 remoteTimeout（默认 480 分钟）到点。
+                    if (releaseOccupy(udId, null)) {
+                        log.info("{} : occupy force-released by stopDebug.", udId);
                     }
                 }
                 case "settings" -> {
@@ -437,6 +447,33 @@ public class TransportClient extends WebSocketClient {
             }
         };
         TaskManager.startChildThread(task.getName(), task);
+    }
+
+    /**
+     * 结束一次远程占用（occupy）。release（占用者本人释放）和 stopDebug（强制解除）共用。
+     *
+     * @param platformHint 消息里带的平台（release 有，stopDebug 没有）；优先用占用时记下的
+     * @return 是否确实有一个占用被结束
+     */
+    private boolean releaseOccupy(String udId, Integer platformHint) {
+        ScheduledFuture<?> future = OccupyMap.map.remove(udId);
+        Integer platform = OccupyMap.platformMap.remove(udId);
+        if (future == null) {
+            return false;
+        }
+        future.cancel(true);
+        if (platform == null) {
+            platform = platformHint;
+        }
+        if (platform == null) {
+            platform = SimctlTool.isIOSDevice(udId) ? PlatformType.IOS : PlatformType.ANDROID;
+        }
+        if (platform == PlatformType.IOS) {
+            iosRelease(udId);
+        } else {
+            androidRelease(udId);
+        }
+        return true;
     }
 
     private void androidRelease(String udId) {
