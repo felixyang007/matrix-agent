@@ -45,6 +45,7 @@ import org.cloud.sonic.agent.tests.handlers.IOSStepHandler;
 import org.cloud.sonic.agent.tests.ios.IOSRunStepThread;
 import org.cloud.sonic.agent.tests.ios.IOSTestTaskBootThread;
 import org.cloud.sonic.agent.tools.*;
+import org.cloud.sonic.agent.websockets.AndroidScreenWSServer;
 import org.cloud.sonic.driver.common.tool.SonicRespException;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
@@ -477,6 +478,9 @@ public class TransportClient extends WebSocketClient {
     }
 
     private void androidRelease(String udId) {
+        // 占用结束（release / 强制解除 / 到点）时把网页上的只读观看一起断开：
+        // 设备马上回到 ONLINE，别人打开完整远程控制页时需要这台设备的投屏位。
+        AndroidScreenWSServer.closeWatch(udId);
         AndroidDeviceLocalStatus.finish(udId);
         Thread s = AndroidThreadMap.getMap().get(String.format("%s-uia-thread", udId));
         if (s != null) {

@@ -28,6 +28,7 @@ import org.cloud.sonic.agent.bridge.android.AndroidDeviceBridgeTool;
 import org.cloud.sonic.agent.common.config.WsEndpointConfigure;
 import org.cloud.sonic.agent.common.maps.AndroidAPKMap;
 import org.cloud.sonic.agent.common.maps.AndroidDeviceManagerMap;
+import org.cloud.sonic.agent.common.maps.OccupyMap;
 import org.cloud.sonic.agent.common.maps.ScreenMap;
 import org.cloud.sonic.agent.common.maps.WebSocketSessionMap;
 import org.cloud.sonic.agent.tests.android.minicap.MiniCapUtil;
@@ -39,6 +40,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
@@ -52,6 +54,11 @@ public class AndroidScreenWSServer implements IAndroidWSServer {
     private String key;
     private Map<String, String> typeMap = new ConcurrentHashMap<>();
     private Map<String, String> picMap = new ConcurrentHashMap<>();
+    /**
+     * udId -> 正在只读观看（?mode=watch）的会话。静态：占用释放在 TransportClient 里，
+     * 要从那边找到并断开它；同时用 putIfAbsent 保证一台设备只有一路观看。
+     */
+    private static final Map<String, Session> WATCHERS = new ConcurrentHashMap<>();
 
     private AndroidMonitorHandler androidMonitorHandler = new AndroidMonitorHandler();
 
@@ -65,6 +72,10 @@ public class AndroidScreenWSServer implements IAndroidWSServer {
         IDevice iDevice = AndroidDeviceBridgeTool.getIDeviceByUdId(udId);
         if (iDevice == null) {
             log.info("Target device is not connecting, please check the connection.");
+            return;
+        }
+        if (isWatchRequest(session)) {
+            openWatch(session, iDevice, udId);
             return;
         }
         AndroidDeviceBridgeTool.screen(iDevice, "abort");
@@ -102,6 +113,108 @@ public class AndroidScreenWSServer implements IAndroidWSServer {
 
     }
 
+    /**
+     * 只读观看：给通过 REST API「远程占用」（occupy）的设备在网页上看画面用，URL 带 {@code ?mode=watch}。
+     * <p>
+     * 和完整远程控制页（AndroidWSServer + 本类）的区别：不拿设备锁、不碰远程 ADB 共享 / uia2 /
+     * 输入法、不 {@code am start}、不改自动旋转设置（上面的 {@code screen(iDevice, "abort")}），
+     * 所以 API 那边正在跑的自动化和 {@code adb connect} 都不受影响；关页面也不释放占用。
+     * 占用结束（release / 强制解除 / 到点）时由 {@link #closeWatch(String)} 断开。
+     * <p>
+     * 一台设备同时只允许一路投屏：scrcpy server 用固定的 abstract socket 名，旋转监听
+     * （AndroidMonitorHandler）也是按设备共用的，第二路会把第一路的监听踢掉。
+     */
+    private void openWatch(Session session, IDevice iDevice, String udId) {
+        if (!OccupyMap.map.containsKey(udId)) {
+            refuseWatch(session, udId, "notOccupied");
+            return;
+        }
+        Session normal = WebSocketSessionMap.getSession(String.format("%s-%s", this.getClass().getSimpleName(), udId));
+        if ((normal != null && normal.isOpen()) || !claimWatch(udId, session)) {
+            refuseWatch(session, udId, "busy");
+            return;
+        }
+        // 认领成功之后才写 udId / id：被拒绝的会话 exit() 时什么都不碰，免得按同一个 id
+        // 把正在观看的那路会话从 WebSocketSessionMap 里删掉。
+        session.getUserProperties().put("watch", Boolean.TRUE);
+        session.getUserProperties().put("udId", udId);
+        session.getUserProperties().put("id", String.format("%s-watch-%s", this.getClass().getSimpleName(), udId));
+        WebSocketSessionMap.addSession(session);
+        saveUdIdMapAndSet(session, iDevice);
+
+        // 旋转监听（startMonitor）跑的是 Sonic APK 里的插件，完整页面靠 AndroidWSServer 装，
+        // 这里自己检查。只装不启动 Activity，不会把被测 App 顶到后台。
+        if (!AndroidDeviceBridgeTool.installSonicApk(iDevice)) {
+            log.info("{} : watch refused (apk).", udId);
+            JSONObject refused = new JSONObject();
+            refused.put("msg", "watchRefused");
+            refused.put("reason", "apk");
+            BytesTool.sendText(session, refused.toJSONString());
+            exit(session); // 已经认领并注册过，走完整清理
+            return;
+        }
+
+        session.getUserProperties().put("schedule", ScheduleTool.schedule(() -> {
+            log.info("time up!");
+            if (session.isOpen()) {
+                JSONObject errMsg = new JSONObject();
+                errMsg.put("msg", "error");
+                BytesTool.sendText(session, errMsg.toJSONString());
+                exit(session);
+            }
+        }, BytesTool.remoteTimeout));
+
+        log.info("{} : watch started.", udId);
+        JSONObject ready = new JSONObject();
+        ready.put("msg", "watchReady");
+        BytesTool.sendText(session, ready.toJSONString());
+    }
+
+    /**
+     * 原子地认领这台设备的观看位。已有认领但那路会话已经关了（理论上 exit 会摘掉，
+     * 防御一下），就顶替它，免得残留记录让这台设备永远显示「有人在看」。
+     */
+    private static boolean claimWatch(String udId, Session session) {
+        Session prev = WATCHERS.putIfAbsent(udId, session);
+        return prev == null || (!prev.isOpen() && WATCHERS.replace(udId, prev, session));
+    }
+
+    private static boolean isWatchRequest(Session session) {
+        List<String> mode = session.getRequestParameterMap().get("mode");
+        return mode != null && mode.contains("watch");
+    }
+
+    private static void refuseWatch(Session session, String udId, String reason) {
+        log.info("{} : watch refused ({}).", udId, reason);
+        JSONObject refused = new JSONObject();
+        refused.put("msg", "watchRefused");
+        refused.put("reason", reason);
+        BytesTool.sendText(session, refused.toJSONString());
+        try {
+            session.close();
+        } catch (IOException e) {
+            log.info(e.getMessage());
+        }
+    }
+
+    /**
+     * 远程占用结束时断开该设备的只读观看（没有就什么都不做）。
+     */
+    public static void closeWatch(String udId) {
+        Session session = WATCHERS.get(udId);
+        if (session == null || !session.isOpen()) {
+            return;
+        }
+        JSONObject end = new JSONObject();
+        end.put("msg", "watchEnd");
+        BytesTool.sendText(session, end.toJSONString());
+        try {
+            session.close(); // 会触发 onClose -> exit，停掉 scrcpy 和旋转监听
+        } catch (IOException e) {
+            log.info(e.getMessage());
+        }
+    }
+
     @OnClose
     public void onClose(Session session) {
         exit(session);
@@ -119,8 +232,13 @@ public class AndroidScreenWSServer implements IAndroidWSServer {
     @OnMessage
     public void onMessage(String message, Session session) {
         JSONObject msg = JSON.parseObject(message);
-        log.info("{} send: {}", session.getUserProperties().get("id").toString(), msg);
-        String udId = session.getUserProperties().get("udId").toString();
+        Object udIdProp = session.getUserProperties().get("udId");
+        if (udIdProp == null) {
+            // onOpen 提前返回的会话（鉴权失败、观看被拒绝等）：前端在 open 时就会发 switch，忽略即可。
+            return;
+        }
+        log.info("{} send: {}", session.getUserProperties().get("id"), msg);
+        String udId = udIdProp.toString();
         switch (msg.getString("type")) {
             case "switch" -> {
                 typeMap.put(udId, msg.getString("detail"));
@@ -201,7 +319,12 @@ public class AndroidScreenWSServer implements IAndroidWSServer {
             if (targetDevice != null) {
                 androidMonitorHandler.stopMonitor(targetDevice);
             }
-            WebSocketSessionMap.removeSession(session);
+            // onOpen 的提前 return（鉴权失败、设备不在线、观看被拒绝）都在写 "id" 之前，
+            // 这里不能直接 removeSession(session)，否则在 Assert / NPE 上抛异常。
+            Object idProp = session.getUserProperties().get("id");
+            if (idProp != null) {
+                WebSocketSessionMap.removeSession(idProp.toString());
+            }
             removeUdIdMapAndSet(session);
             if (udId != null) {
                 AndroidDeviceManagerMap.getRotationMap().remove(udId);
@@ -210,6 +333,9 @@ public class AndroidScreenWSServer implements IAndroidWSServer {
             }
             if (ScreenMap.getMap().get(session) != null) {
                 ScreenMap.getMap().get(session).interrupt();
+            }
+            if (udId != null) {
+                WATCHERS.remove(udId, session); // 只摘自己的认领，不影响别的会话
             }
             try {
                 session.close();
