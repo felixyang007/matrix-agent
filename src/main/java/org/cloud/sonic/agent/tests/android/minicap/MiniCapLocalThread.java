@@ -164,7 +164,9 @@ public class MiniCapLocalThread extends Thread {
                     // 已经在调的 ScreenMap.getMap().get(session).interrupt()。
                     return Thread.currentThread().isInterrupted();
                 }
-            }, 60L, TimeUnit.SECONDS);
+                // 必须是 0（不限时），原因同 ScrcpyLocalThread：这是「无输出超时」，minicap
+                // 启动后也不再输出，填 60s 会在约 1 分钟时被杀，还会被下面的 catch 误判为失败。
+            }, 0, TimeUnit.MILLISECONDS);
         } catch (Exception e) {
             isSuc.set(false);
             log.info("{} minicap stopped."

@@ -132,7 +132,11 @@ public class ScrcpyLocalThread extends Thread {
                             // 不用再另开一个标记字段。
                             return Thread.currentThread().isInterrupted();
                         }
-                    }, 60L, TimeUnit.SECONDS);
+                        // 必须是 0（不限时）。ddmlib 这个参数是「多久没有输出就判无响应」，
+                        // 不是总超时；scrcpy server 启动打完两行日志后就不再输出，填 60s
+                        // 会在开投屏约 68 秒时被 ShellCommandUnresponsiveException 杀掉，
+                        // 画面冻住（v2.7.10~v2.7.13 的回归）。会话结束靠上面的 isCancelled 停。
+                    }, 0, TimeUnit.MILLISECONDS);
         } catch (Exception e) {
             log.info("{} scrcpy service stopped.", iDevice.getSerialNumber());
             log.error(e.getMessage());
